@@ -257,7 +257,33 @@ impl UsageProvider for ClaudeProvider {
     }
 }
 
-/// `~/.claude/.credentials.json`, written and refreshed by Claude Code.
+/// Why the usage endpoint cannot be asked, in the words the card will show.
+///
+/// The card draws this on one line at 11px inside a 280px slab — about
+/// forty-five characters. A longer message is not a more helpful one, it is
+/// an invisible one, and [`the budget below`](tests) keeps it that way.
+///
+/// Each says what is wrong *and* what fixes it, because "needs auth" on its
+/// own leaves the user to guess which of several Claude clients they are
+/// supposed to do something to.
+const MSG_NOT_SIGNED_IN: &str = "Not signed in — run `claude` in a terminal";
+const MSG_EXPIRED: &str = "Token expired — run `claude` in a terminal";
+const MSG_UNREADABLE: &str = "Credentials file is unreadable";
+#[cfg(test)]
+const MESSAGE_BUDGET: usize = 45;
+
+/// `~/.claude/.credentials.json`, written by whichever Claude client last
+/// signed in from a terminal.
+///
+/// Notably *not* by the desktop app, which keeps its own tokens encrypted in
+/// `~/.config/Claude/config.json` under `oauth:tokenCacheV2`, behind an
+/// Electron safeStorage key held in the system keyring. For a desktop-only
+/// user this file is a leftover from their last terminal login and stops
+/// working eight hours later. See docs/design.md — the short version is that
+/// brimlim will not reach into another application's encrypted store, and
+/// will not refresh this file either, so all it can do is say so precisely.
+/// Deliberately not `Debug`: a struct holding an access token should not be
+/// one that a stray `{:?}` can put in a log file.
 struct Credentials {
     access_token: String,
 }
@@ -265,20 +291,23 @@ struct Credentials {
 impl Credentials {
     fn load() -> Result<Self, String> {
         let path = paths::claude_dir().join(".credentials.json");
-        let raw = std::fs::read_to_string(&path)
-            .map_err(|_| format!("no Claude credentials at {}", path.display()))?;
-        let file: CredentialsFile =
-            serde_json::from_str(&raw).map_err(|e| format!("unreadable credentials: {e}"))?;
-        let oauth = file
-            .oauth
-            .ok_or_else(|| "not signed in to Claude".to_owned())?;
+        // A missing file and an unreadable one are different problems with
+        // different answers, and neither of them is "expired".
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            return Err(MSG_NOT_SIGNED_IN.to_owned());
+        };
+        Self::parse(&raw, Utc::now().timestamp_millis())
+    }
 
-        // Claude Code refreshes this file itself; if it has gone stale the
-        // honest answer is "go run the CLI", not a stale number.
-        if let Some(expires_at) = oauth.expires_at
-            && expires_at <= Utc::now().timestamp_millis()
-        {
-            return Err("Claude token expired — run `claude` to refresh".to_owned());
+    /// Split out from [`Self::load`] so every branch can be tested without a
+    /// home directory to stand in.
+    fn parse(raw: &str, now_ms: i64) -> Result<Self, String> {
+        let file: CredentialsFile =
+            serde_json::from_str(raw).map_err(|_| MSG_UNREADABLE.to_owned())?;
+        let oauth = file.oauth.ok_or_else(|| MSG_NOT_SIGNED_IN.to_owned())?;
+
+        if oauth.expires_at.is_some_and(|at| at <= now_ms) {
+            return Err(MSG_EXPIRED.to_owned());
         }
         Ok(Self {
             access_token: oauth.access_token,
@@ -511,6 +540,66 @@ mod tests {
             status: None,
         };
         assert_eq!(entry.display_name(), "brimlim");
+    }
+
+    /// A credentials file with obviously fake values. Shaped like the real
+    /// one; nothing in here is a secret, in this repository or anywhere.
+    fn credentials_json(expires_at: i64) -> String {
+        format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"not-a-real-token",
+               "refreshToken":"also-not-real","expiresAt":{expires_at},
+               "scopes":["user:inference"],"subscriptionType":"max"}}}}"#
+        )
+    }
+
+    /// `Credentials` is not `Debug`, on purpose, so assertions go through
+    /// the one field a test is allowed to look at.
+    fn token_of(result: Result<Credentials, String>) -> Result<String, String> {
+        result.map(|c| c.access_token)
+    }
+
+    #[test]
+    fn a_live_token_is_accepted() {
+        assert_eq!(
+            token_of(Credentials::parse(&credentials_json(2_000), 1_000)),
+            Ok("not-a-real-token".to_owned())
+        );
+    }
+
+    #[test]
+    fn each_way_of_having_no_token_says_something_different() {
+        // "needs auth" on its own leaves the user guessing which of several
+        // Claude clients they are meant to do something to. Every branch
+        // names the remedy, and no two branches say the same thing.
+        let expired = token_of(Credentials::parse(&credentials_json(1_000), 2_000)).unwrap_err();
+        let signed_out = token_of(Credentials::parse(r#"{"mcpOAuth":{}}"#, 0)).unwrap_err();
+        let unreadable = token_of(Credentials::parse("{ this is not json", 0)).unwrap_err();
+
+        assert_eq!(expired, MSG_EXPIRED);
+        assert_eq!(signed_out, MSG_NOT_SIGNED_IN);
+        assert_eq!(unreadable, MSG_UNREADABLE);
+        assert_ne!(expired, signed_out);
+    }
+
+    #[test]
+    fn a_token_with_no_expiry_is_not_assumed_to_be_expired() {
+        // Absent is not zero. A file that never carried an expiry is not a
+        // file whose token expired in 1970.
+        let raw = r#"{"claudeAiOauth":{"accessToken":"not-a-real-token"}}"#;
+        assert!(token_of(Credentials::parse(raw, i64::MAX)).is_ok());
+    }
+
+    #[test]
+    fn every_auth_message_fits_on_the_card() {
+        // The card draws one line at 11px inside a 280px slab. A message
+        // that overflows it is not a worse message, it is an invisible one.
+        for message in [MSG_NOT_SIGNED_IN, MSG_EXPIRED, MSG_UNREADABLE] {
+            let width = message.chars().count();
+            assert!(
+                width <= MESSAGE_BUDGET,
+                "{message:?} is {width} characters, budget is {MESSAGE_BUDGET}"
+            );
+        }
     }
 
     #[test]

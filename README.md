@@ -59,7 +59,7 @@ Download `brimlim_<version>_amd64.deb` from
 [Releases](https://github.com/the-wagner-dev/brimlim/releases) and:
 
 ```bash
-sudo apt install ./brimlim_0.1.1_amd64.deb
+sudo apt install ./brimlim_0.1.2_amd64.deb
 ```
 
 ### AppImage
@@ -102,9 +102,13 @@ no number at all. Nothing is estimated from token counts.
 | **Claude** | `api.anthropic.com/api/oauth/usage` | the OAuth token Claude Code already refreshed into `~/.claude/.credentials.json`, asked at most once every five minutes. Sessions — and their `busy`/`idle` status — from `~/.claude/sessions/<pid>.json`, the registry the CLI keeps of itself. |
 | **Codex** | `~/.codex/sessions/**` | Codex writes the server's own `rate_limits` payload into every rollout log, so there is no second API call at all. Sessions from `/proc`. |
 
-brimlim never refreshes anyone's OAuth token — that would race the CLI for the
-same file. An expired token is reported as `needs_auth`, and you fix it by
-using the CLI as usual.
+brimlim never refreshes anyone's OAuth token — that would race whichever
+client owns the file. An expired token is reported as `needs_auth` with the
+remedy in the card, and no number at all until it is fixed.
+
+If you use the **Claude desktop app** rather than the terminal CLI, expect to
+need this: the app keeps its own credentials elsewhere and never writes the
+file brimlim reads. See [Troubleshooting](#troubleshooting).
 
 More providers go behind the same `UsageProvider` trait; see
 [`crates/brimlimd/src/providers`](crates/brimlimd/src/providers).
@@ -312,9 +316,42 @@ Tagging `v<version>` builds all of it in CI, attaches it to a GitHub release
 and publishes the apt repository. There is no auto-updater; packages are the
 update mechanism.
 
+## Troubleshooting
+
+**Claude shows a dash and "Token expired — run `claude` in a terminal".**
+
+brimlim reads Claude's usage with the OAuth token in
+`~/.claude/.credentials.json`. That file is written by the Claude Code CLI
+when *it* signs in — but the **desktop app does not use it**. It keeps its own
+tokens encrypted in `~/.config/Claude/config.json`, behind a key in your
+system keyring, and never writes the CLI's file. So if you only ever use the
+desktop app, that file is a leftover from your last terminal login and stops
+working about eight hours later.
+
+Signing in once from a terminal fixes it, and using `claude` there from time
+to time keeps it fixed:
+
+```bash
+claude
+```
+
+brimlim will not refresh that token itself — it would race whichever client
+owns the file — and it will not reach into the desktop app's encrypted store
+to borrow its token. Until it has a token it can use, it shows no number,
+which is the same rule the rest of the project runs on. The reasoning is in
+[docs/design.md](docs/design.md#where-claudes-token-actually-lives).
+
+**The notch never appears.** It starts collapsed as a 4-pixel tongue against
+the edge — hover that. `gnome-extensions info brimlim@the-wagner-dev.github.io`
+says whether it is enabled, and `systemctl --user status brimlimd` whether the
+daemon is up.
+
+**Codex shows a number but Claude does not, or the other way round.** Each
+provider fails on its own; one being unreadable never takes the other down.
+
 ## Status
 
-v0.1.1. The daemon, both frontends and the packaging are built and tested,
+v0.1.2. The daemon, both frontends and the packaging are built and tested,
 and the GNOME extension is checked against a real GNOME 50 Shell on every
 change. The GTK frontend has not yet been run on a real layer-shell
 compositor — if you use Hyprland, KWin or sway,

@@ -121,6 +121,53 @@ Claude Code keeps of live CLIs.
 there is no second API call. Sessions come from scanning `/proc`, because Codex
 keeps no registry.
 
+### Where Claude's token actually lives
+
+`~/.claude/.credentials.json` is written by the Claude Code CLI, and the
+daemon reads the OAuth token out of it. The desktop app does not use that
+file at all. Observed on a machine running it, rather than assumed:
+
+* the file's `expiresAt` is exactly eight hours after its own mtime, and it
+  had not been rewritten in the fourteen hours since — while the app was
+  writing `~/.config/Claude/config.json`, its cookies and its log
+  continuously through all of it;
+* that `config.json` carries `oauth:tokenCacheV2` and `oauth:tokenCache`,
+  rewritten minutes before the check;
+* those are encrypted with an Electron `safeStorage` key, which sits in the
+  system keyring as *Claude Safe Storage* with the schema
+  `chrome_libsecret_os_crypt_password_v2`;
+* the string `credentials.json` does not appear anywhere in the app's six
+  megabytes of log.
+
+So for a desktop-only user the CLI's file is a leftover from their last
+terminal login, and goes stale eight hours later.
+
+Two things were considered and rejected.
+
+**Decrypting the app's store.** The key is right there in the keyring, and
+the token is in a file we can read. But it means pulling another
+application's credentials out of its private encrypted store by
+reimplementing an undocumented Chromium format — one whose `V2` suffix says
+it has already changed once — in order to put a token we were never given on
+the network. The daemon already refuses the far smaller reach of rewriting a
+file the CLI owns. This is not a closer call than that one; it is the same
+call, further away.
+
+**Reading a first-party usage payload instead.** Codex is read this way: it
+writes the server's own `rate_limits` into every rollout log, so no second
+API call is needed, and no token either. The desktop app has the same shape
+of data — its log shows a `plan-usage-history` feature with a tray display —
+but it keeps none of it on disk. `config.json`, Local Storage, IndexedDB, the
+log and all of `~/.claude` were searched for a usage or rate-limit payload;
+there is none.
+
+What is left is to say so precisely. `needs_auth` on its own leaves the user
+guessing which of several Claude clients they are meant to do something to,
+so each failure names its own remedy — signed out, expired, or unreadable —
+inside the forty-five characters the card can actually draw, which a test
+enforces. Nothing invents a number in the meantime; a reading from before the
+token expired stays on screen, dimmed and dated, until it ages out.
+
 ### Activity
 
 Claude Code keeps a registry of its own live CLIs at
