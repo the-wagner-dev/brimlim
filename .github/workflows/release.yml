@@ -1,0 +1,217 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # See ci.yml: gtk4-layer-shell is not in 24.04, and a .deb should be
+    # linked against the release it claims to support.
+    container: ubuntu:26.04
+
+    steps:
+      - name: System dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential pkg-config curl ca-certificates git file \
+            libgtk-4-dev libgtk4-layer-shell-dev libglib2.0-dev-bin \
+            gjs gir1.2-gtk-4.0 dpkg-dev fakeroot python3 zip \
+            desktop-file-utils librsvg2-bin rustup
+
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: |
+          rustup default stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Tests
+        run: |
+          cargo test --all
+          gjs -m tools/test.js
+
+      - name: Debian package and extension zip
+        run: |
+          ./packaging/deb/build.sh
+          ./packaging/gnome-extension/build.sh
+
+      - name: AppImages
+        # appimagetool and linuxdeploy are themselves AppImages, and there is
+        # no FUSE in a container; extract-and-run is the supported way out.
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          ./packaging/appimage/fetch-tools.sh
+          ./packaging/appimage/build.sh
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --generate-notes \
+            dist/* \
+          || gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber dist/*
+
+  apt:
+    needs: build
+    runs-on: ubuntu-latest
+    # Nothing to publish without a signing key; an unsigned apt repository is
+    # worse than none, so this job stands down rather than producing one.
+    if: ${{ github.event_name == 'push' }}
+    concurrency: apt-repo
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends apt-utils dpkg-dev
+
+      - name: Import signing key
+        id: key
+        env:
+          PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "APT_GPG_PRIVATE_KEY is not set; skipping the apt repository."
+            echo "have_key=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s' "$PRIVATE_KEY" | gpg --batch --import
+          KEY_ID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')"
+          echo "key_id=$KEY_ID" >> "$GITHUB_OUTPUT"
+          echo "have_key=true" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch the published archive
+        if: steps.key.outputs.have_key == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # Distinguish "the branch does not exist yet" from "the clone
+          # failed": only the first may start from an empty archive. A clone
+          # that fails for any other reason must stop the job, because the
+          # publish step force-pushes and would drop every existing package.
+          if git ls-remote --exit-code --heads "$REMOTE" gh-pages >/dev/null; then
+            git clone --quiet --depth 1 --branch gh-pages "$REMOTE" pages
+          else
+            echo "gh-pages does not exist yet; starting a new archive."
+            git init -q -b gh-pages pages
+          fi
+
+      - name: Build the repository
+        if: steps.key.outputs.have_key == 'true'
+        env:
+          KEY_ID: ${{ steps.key.outputs.key_id }}
+          GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          mkdir -p pages
+          cd pages
+
+          # Every previously published .deb stays in the pool: apt clients
+          # pinned to an older version must keep resolving, and a release is
+          # an addition to an archive, not a replacement of one.
+          mkdir -p pool/main/b/brimlim dists/stable/main/binary-amd64
+          cp ../dist/*.deb pool/main/b/brimlim/
+
+          dpkg-scanpackages --arch amd64 pool /dev/null \
+            > dists/stable/main/binary-amd64/Packages
+          gzip -9kf dists/stable/main/binary-amd64/Packages
+
+          cat > /tmp/apt-release.conf <<'EOF'
+          APT::FTPArchive::Release::Origin "brimlim";
+          APT::FTPArchive::Release::Label "brimlim";
+          APT::FTPArchive::Release::Suite "stable";
+          APT::FTPArchive::Release::Codename "stable";
+          APT::FTPArchive::Release::Architectures "amd64";
+          APT::FTPArchive::Release::Components "main";
+          APT::FTPArchive::Release::Description "brimlim packages";
+          EOF
+          apt-ftparchive -c /tmp/apt-release.conf release dists/stable \
+            > dists/stable/Release
+
+          GPG="gpg --batch --yes --pinentry-mode loopback --local-user $KEY_ID"
+          if [ -n "${GPG_PASSPHRASE:-}" ]; then
+            GPG="$GPG --passphrase $GPG_PASSPHRASE"
+          fi
+          $GPG --clearsign -o dists/stable/InRelease dists/stable/Release
+          $GPG -abs -o dists/stable/Release.gpg dists/stable/Release
+
+          # The key users add to /etc/apt/keyrings, in the binary form apt
+          # wants, so nobody has to run gpg --dearmor by hand.
+          gpg --export "$KEY_ID" > brimlim-archive-keyring.gpg
+
+          if [ ! -f index.html ]; then
+          cat > index.html <<'EOF'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>brimlim apt repository</title>
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <style>
+            body{font:16px/1.6 system-ui,sans-serif;max-width:46rem;margin:4rem auto;padding:0 1rem}
+            pre{background:#111;color:#eee;padding:1rem;border-radius:.5rem;overflow-x:auto}
+          </style>
+          <h1>brimlim</h1>
+          <p>Usage-limit overlay for AI coding assistants.
+          <a href="https://github.com/the-wagner-dev/brimlim">Source and documentation</a>.</p>
+          <pre><code>curl -fsSL https://the-wagner-dev.github.io/brimlim/brimlim-archive-keyring.gpg | sudo tee /etc/apt/keyrings/brimlim-archive-keyring.gpg &gt; /dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/brimlim-archive-keyring.gpg] https://the-wagner-dev.github.io/brimlim stable main" | sudo tee /etc/apt/sources.list.d/brimlim.list
+          sudo apt update &amp;&amp; sudo apt install brimlim</code></pre>
+          EOF
+          fi
+
+          touch .nojekyll
+
+      - name: Publish
+        if: steps.key.outputs.have_key == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git add -A
+          git commit -q -m "apt: publish ${TAG}" || { echo "nothing to publish"; exit 0; }
+          git push -q --force origin HEAD:gh-pages

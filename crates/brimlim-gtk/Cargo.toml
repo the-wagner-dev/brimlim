@@ -1,0 +1,33 @@
+[package]
+name = "brimlim-gtk"
+description = "Layer-shell frontend for brimlimd, for Hyprland and KWin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "brimlim_gtk"
+path = "src/lib.rs"
+
+[[bin]]
+name = "brimlim-gtk"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+brimlim-model.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+clap = { version = "4", features = ["derive"] }
+gtk4 = "0.11"
+gtk4-layer-shell = "0.8"
+pangocairo = "0.22"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+serde_json = "1"
+# Only to turn on cairo's PNG writer for examples/render.rs; features are
+# additive, so this enables write_to_png on gtk4::cairo's ImageSurface.
+cairo-rs = { version = "0.22", features = ["png"] }

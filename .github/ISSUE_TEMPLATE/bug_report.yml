@@ -1,0 +1,49 @@
+name: Bug report
+description: Something does not work
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected instead.
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: Distribution and desktop
+      description: >
+        Distribution and version, plus the compositor and its version —
+        GNOME Shell 50, Hyprland 0.4x, KWin 6.x, sway …
+      placeholder: Ubuntu 26.04, GNOME Shell 50.1, Wayland
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: brimlim version
+      placeholder: "brimlimd --version, or the .deb / AppImage you installed"
+    validations:
+      required: true
+
+  - type: textarea
+    id: state
+    attributes:
+      label: Daemon state
+      description: >
+        `brimlimd --json` — redact anything you would rather not share. This
+        shows what the daemon actually read, which separates "the number is
+        wrong" from "the notch drew it wrong".
+      render: json
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        `journalctl --user -u brimlimd -n 100 --no-pager`, and for the GNOME
+        extension `journalctl --user -b 0 -g brimlim -n 100 --no-pager`.
+      render: shell

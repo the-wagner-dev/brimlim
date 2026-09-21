@@ -1,0 +1,11 @@
+{
+  "uuid": "brimlim@the-wagner-dev.github.io",
+  "name": "Brimlim",
+  "description": "A floating edge overlay showing AI coding assistant usage limits and whether an agent is working right now. Reads its state from brimlimd over the session bus.",
+  "shell-version": ["50"],
+  "session-modes": ["user"],
+  "url": "https://github.com/the-wagner-dev/brimlim",
+  "settings-schema": "org.gnome.shell.extensions.brimlim",
+  "gettext-domain": "brimlim",
+  "version-name": "0.1.0"
+}

@@ -1,0 +1,21 @@
+[Unit]
+Description=Brimlim usage daemon
+Documentation=https://github.com/the-wagner-dev/brimlim
+PartOf=graphical-session.target
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/brimlimd
+Restart=on-failure
+RestartSec=5
+# The daemon reads agent state and talks to provider APIs; nothing else.
+# Kept to what a *user* unit can actually apply: PrivateDevices and friends
+# need capabilities a user manager does not have, and systemd fails the unit
+# with 218/CAPABILITIES rather than ignoring them.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/brimlim
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=graphical-session.target

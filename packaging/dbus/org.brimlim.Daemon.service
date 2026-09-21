@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.brimlim.Daemon
+Exec=/usr/bin/brimlimd
+SystemdService=brimlimd.service

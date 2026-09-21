@@ -1,0 +1,35 @@
+brimlim
+Copyright (c) 2026 brimlim contributors
+Licensed under the MIT License; see LICENSE.
+
+Attribution
+-----------
+
+brimlim is an independent Linux implementation. The idea of a floating,
+edge-of-screen notch that shows how much of an AI coding assistant's limits
+you have burned comes from codenotch (macOS):
+
+    https://github.com/vinzdg/codenotch
+
+No code, assets, or other material from that project were copied, translated,
+or otherwise used here. The daemon, both frontends, the packaging, and the
+drawing code in this repository were written from scratch against Linux APIs
+(D-Bus, GNOME Shell/GJS, GTK4, wlr-layer-shell, Cairo), and the visual
+proportions were measured from publicly published screenshots rather than
+taken from any source. The credit above is given because the concept deserves
+it, not because of any shared code.
+
+Third-party marks
+-----------------
+
+The provider marks drawn in `lib/paint.js` and `crates/brimlim-gtk/src/paint.rs`
+are original simplified silhouettes used to identify the service a ring
+belongs to. "Claude" and "Anthropic" are trademarks of Anthropic PBC;
+"Codex" and "OpenAI" are trademarks of OpenAI. brimlim is not affiliated
+with, endorsed by, or sponsored by either company.
+
+Third-party code
+----------------
+
+Rust dependencies are listed in Cargo.toml and locked in Cargo.lock; each
+carries its own license. Run `cargo tree` to enumerate them.

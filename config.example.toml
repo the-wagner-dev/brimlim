@@ -1,0 +1,18 @@
+# ~/.config/brimlim/config.toml — every key is optional.
+
+# How often cheap local state (sessions, on-disk logs) is re-read.
+tick_secs = 3
+
+# Floor on how often a provider may call a network API, whatever the tick is.
+# Usage windows are hours long; asking every minute only earns a 429.
+api_interval_secs = 300
+
+# Older than this, a reading is still shown but flagged `stale`.
+stale_after_minutes = 20
+
+# Older than this, a remembered reading is dropped instead of shown.
+max_reading_age_hours = 12
+
+[providers]
+claude = true
+codex = true

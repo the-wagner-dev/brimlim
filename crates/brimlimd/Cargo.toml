@@ -1,0 +1,27 @@
+[package]
+name = "brimlimd"
+description = "Usage-limit and activity daemon for AI coding assistants"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+brimlim-model.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+clap = { version = "4", features = ["derive"] }
+directories = "6"
+futures-util = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "rustls-native-certs", "charset", "http2"] }
+toml = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
+[dev-dependencies]
+tempfile = "3"

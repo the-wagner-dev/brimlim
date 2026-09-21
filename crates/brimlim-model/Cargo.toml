@@ -1,0 +1,10 @@
+[package]
+name = "brimlim-model"
+description = "The wire model shared by brimlimd and its frontends"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true

@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["crates/brimlim-model", "crates/brimlimd", "crates/brimlim-gtk"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/the-wagner-dev/brimlim"
+
+[workspace.dependencies]
+brimlim-model = { path = "crates/brimlim-model" }
+anyhow = "1.0"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "sync", "fs"] }
+tracing = "0.1"

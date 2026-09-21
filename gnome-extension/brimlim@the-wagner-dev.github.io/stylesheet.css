@@ -1,0 +1,115 @@
+/* The pill body and rings are Cairo; everything here is the card, whose
+   content is text and therefore belongs to the theme system. */
+
+/* The slab and its tail are drawn in Cairo; this only carries the text. */
+.brimlim-card {
+    color: #e7e9ee;
+}
+
+.brimlim-card-content {
+    spacing: 2px;
+}
+
+.brimlim-card-header {
+    spacing: 8px;
+    padding-bottom: 8px;
+}
+
+.brimlim-card-title {
+    font-weight: 700;
+    font-size: 13px;
+    color: #ffffff;
+}
+
+.brimlim-chip {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.10);
+    color: rgba(231, 233, 238, 0.85);
+}
+
+.brimlim-chip-stale { background-color: rgba(255, 179, 64, 0.20); color: #ffc978; }
+.brimlim-chip-needs-auth { background-color: rgba(255, 179, 64, 0.28); color: #ffd79b; }
+.brimlim-chip-error { background-color: rgba(255, 92, 92, 0.24); color: #ff9c9c; }
+.brimlim-chip-fidelity { color: rgba(231, 233, 238, 0.65); }
+
+.brimlim-window { padding: 5px 0; }
+
+.brimlim-window-name {
+    font-size: 12px;
+    color: rgba(231, 233, 238, 0.90);
+}
+
+.brimlim-bar {
+    height: 6px;
+    border-radius: 3px;
+    background-color: rgba(255, 255, 255, 0.10);
+    margin: 4px 0 3px 0;
+}
+
+.brimlim-bar-fill {
+    height: 6px;
+    border-radius: 3px;
+}
+
+.brimlim-window-reset {
+    font-size: 11px;
+    color: rgba(231, 233, 238, 0.55);
+}
+
+.brimlim-window-used {
+    font-size: 11px;
+    color: rgba(231, 233, 238, 0.90);
+    padding-top: 1px;
+}
+
+.brimlim-card-empty,
+.brimlim-card-note {
+    font-size: 11px;
+    color: rgba(231, 233, 238, 0.60);
+    padding: 4px 0;
+}
+
+.brimlim-sessions {
+    padding-top: 8px;
+    margin-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    spacing: 3px;
+}
+
+.brimlim-sessions-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(231, 233, 238, 0.75);
+}
+
+.brimlim-sessions-age {
+    font-size: 10px;
+    color: rgba(231, 233, 238, 0.45);
+}
+
+.brimlim-session { spacing: 7px; }
+
+.brimlim-session-name {
+    font-size: 11px;
+    color: rgba(231, 233, 238, 0.90);
+}
+
+.brimlim-session-state {
+    font-size: 10px;
+    color: rgba(231, 233, 238, 0.45);
+}
+
+.brimlim-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    margin-top: 4px;
+    background-color: rgba(255, 255, 255, 0.25);
+}
+
+.brimlim-dot-working { background-color: #4d9eff; }
+.brimlim-dot-waiting { background-color: #ffb340; }
+.brimlim-dot-idle { background-color: rgba(255, 255, 255, 0.25); }

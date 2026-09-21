@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # Built inside the target release rather than on the runner image:
+    # gtk4-layer-shell only exists from Ubuntu 24.10 onwards, so a 24.04
+    # runner cannot build the layer-shell frontend at all, and a .deb is only
+    # honest about its dependencies if it was linked against them.
+    container: ubuntu:26.04
+
+    steps:
+      - name: System dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential pkg-config curl ca-certificates git \
+            libgtk-4-dev libgtk4-layer-shell-dev libglib2.0-dev-bin \
+            gjs gir1.2-gtk-4.0 dpkg-dev fakeroot python3 zip \
+            rustup
+
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: |
+          rustup default stable
+          rustup component add rustfmt clippy
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --all
+
+      - name: GJS tests
+        run: gjs -m tools/test.js
+
+      - name: The two Cairo ports still agree
+        # The drawing logic exists twice, in GJS and in Rust. The Rust tests
+        # check themselves against a recorded dump of the GJS output; if that
+        # dump is stale the agreement is meaningless, so regenerate it here
+        # and fail on any difference.
+        run: |
+          gjs -m tools/dump-reference.js > /tmp/reference.json
+          diff -u crates/brimlim-gtk/fixtures/reference.json /tmp/reference.json
+
+      - name: Build packages
+        run: |
+          ./packaging/deb/build.sh
+          ./packaging/gnome-extension/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: dist/*
+          if-no-files-found: error

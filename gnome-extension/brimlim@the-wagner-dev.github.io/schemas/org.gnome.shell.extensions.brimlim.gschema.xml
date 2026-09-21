@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="brimlim">
+  <enum id="org.gnome.shell.extensions.brimlim.edge">
+    <value value="0" nick="top"/>
+    <value value="1" nick="right"/>
+    <value value="2" nick="bottom"/>
+    <value value="3" nick="left"/>
+  </enum>
+
+  <enum id="org.gnome.shell.extensions.brimlim.mode">
+    <value value="0" nick="auto-hide"/>
+    <value value="1" nick="always-visible"/>
+    <value value="2" nick="hidden"/>
+  </enum>
+
+  <schema id="org.gnome.shell.extensions.brimlim"
+          path="/org/gnome/shell/extensions/brimlim/">
+    <key name="edge" enum="org.gnome.shell.extensions.brimlim.edge">
+      <default>'right'</default>
+      <summary>Screen edge the notch lives on</summary>
+    </key>
+
+    <key name="mode" enum="org.gnome.shell.extensions.brimlim.mode">
+      <default>'auto-hide'</default>
+      <summary>Reveal behaviour</summary>
+      <description>auto-hide collapses to a tongue until hovered; always-visible keeps the pill out; hidden shows nothing at all.</description>
+    </key>
+
+    <key name="monitor" type="i">
+      <default>-1</default>
+      <summary>Monitor index, or -1 for the primary monitor</summary>
+    </key>
+
+    <key name="show-in-fullscreen" type="b">
+      <default>false</default>
+      <summary>Keep the notch visible over fullscreen windows</summary>
+    </key>
+
+    <key name="show-in-overview" type="b">
+      <default>false</default>
+      <summary>Keep the notch visible in the Activities overview</summary>
+    </key>
+
+    <key name="reveal-on-activity" type="b">
+      <default>true</default>
+      <summary>Reveal for a few seconds when a session finishes or starts waiting</summary>
+    </key>
+
+    <key name="sound-on-activity" type="b">
+      <default>true</default>
+      <summary>Play a sound when a session finishes or starts waiting</summary>
+    </key>
+  </schema>
+</schemalist>
