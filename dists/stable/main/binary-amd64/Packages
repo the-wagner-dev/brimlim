@@ -1,14 +1,14 @@
 Package: brimlim
-Version: 0.1.0
+Version: 0.1.1
 Architecture: amd64
 Maintainer: wagner-val <wagner-val@users.noreply.github.com>
 Depends: libc6, libgcc-s1, libgtk-4-1, libgtk4-layer-shell0, libcairo2, libpango-1.0-0, libpangocairo-1.0-0, libglib2.0-0t64 | libglib2.0-0
 Recommends: gnome-shell, libcanberra-gtk3-module
-Filename: pool/main/b/brimlim/brimlim_0.1.0_amd64.deb
-Size: 4207544
-MD5sum: 3fad89a56c1f7a311408f409722d575c
-SHA1: 5085d866d6bd94dc0eecad669b5eb55616155fa6
-SHA256: 0c3dd7eb922d2a6d7b9b96810e479a3e5d87eb2c20b6317dfe8e4c26879f12ce
+Filename: pool/main/b/brimlim/brimlim_0.1.1_amd64.deb
+Size: 4201878
+MD5sum: 12e3acba42c86f5b24651523d631a111
+SHA1: ba1051c74d8fee123c927cfa3d3df78a07d08813
+SHA256: 864d47fbe79b79429dfb48b331b7c7be8c999692ad6a9127d784e5926d014273
 Section: utils
 Priority: optional
 Homepage: https://github.com/the-wagner-dev/brimlim
