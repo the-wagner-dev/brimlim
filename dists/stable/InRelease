@@ -1,0 +1,43 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Architectures: amd64
+Codename: stable
+Components: main
+Date: Mon, 21 Sep 2026 01:17:42 +0000
+Description: brimlim packages
+Label: brimlim
+Origin: brimlim
+Suite: stable
+MD5Sum:
+ fd7b17c97f38424f6cfb1d30f07220e5              168 Release
+ 27089e30d85f730b69e37da4d1dbfa48             1056 main/binary-amd64/Packages
+ a1febe2aabc3be86f54d186eea78b87a              685 main/binary-amd64/Packages.gz
+SHA1:
+ 275e0b27e214e13acfc9549a730983160bf6bea9              168 Release
+ 73eeb37b6a62e40ba0442e46820d47bcf4ee8757             1056 main/binary-amd64/Packages
+ 5f000d32eb3d76546f55c0611c12cf94f17ff94b              685 main/binary-amd64/Packages.gz
+SHA256:
+ a0064d1af5ed590fd393b2515f3da5885937d4904206679ffdda79316b630965              168 Release
+ edaffc2ad710082a6552f90ebde48407944e3b3ab21780d4838d26e739330648             1056 main/binary-amd64/Packages
+ 8774cd9f22aac8fcb102918b0200d73e9a0b1dec6a75a3ed910ac293069316ab              685 main/binary-amd64/Packages.gz
+SHA512:
+ f9f139115ac62590220ab86928f3939a87747c75b38a2ede3f68bed0dffa9271a2af7622d91a81b45e3d49347633822a3e853515fba37fddc09aa42b12f30473              168 Release
+ d158552583c46ccdd3ca4aed44601f416bad265274d8d31ed90382498b7e290b7bb7132a6e8fe451575a82f79dc58e428866a7a4801b7181b691480aa3a72324             1056 main/binary-amd64/Packages
+ 3bd3dafeba23cf91057cee0add92c5f4588032a7ad6887f7dd164efc34db2a8cfa9aee116557427fbf4a29930ab20b16b9871092a05dc6fd24f04ec6039326ee              685 main/binary-amd64/Packages.gz
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCgAdFiEELr9zD3WMCRnAjsDEAAZkaVbp8koFAmqwhbYACgkQAAZkaVbp
+8ko9xA/+M+ZNRvjGUWNsDFwUvqPFi147bYXcT48JAifXN0ZNcVbnZ5FJIsHigrI5
+Ly4Nox2bdyc6TqbpexN7S1Q8li5W8NwgRaSa7Dl0oKn9feJE4BITj38PH1XxRZrJ
+8paFlCurBYrXNRXKDZPCS5Y9rGEUGitYEW4EZxQqKMUKUvj9Xhi4b8uXqVK2pxQB
+51ESpIRbd58Ucow9vKTgiN5sVnf7Gre10X/h82uqDarJwvgEJ4LezNQp6ORfOc3W
+MltAw6zbx/I7LZlIsA7p8lGbm3/f/j5SKUIfdLsOxEKvNktEcyx5e3Q1D5yxA8Av
+aHks9eRXUehKa1kLzue6Ur/1USZnvij+DtiFXp/rWmnS1b87OVqtE0z93Ni0KZIV
+/tLEkTFpigcA0C+/JDgOZ5Cwxu7mDXsZ9STTLP6/m+S/1jTqQUsEOB8Dsi7dhiYP
+G1r+UFEAiaitD11CFqBLTF/PuApTazeIJRZMgWzjgpPggRJIBR+ziuzwKCFXjB9J
+QEIJAtwWC15hEKZ6Zeeqk6wpqk7lY3MNmGc02bB7m+VJpOFNPyEhYeKozQGUwTNC
+dldm7OUvbZgQf4YSykNPhpZ918q8W51mTTOFvFIwWW2UYNud3rC6qenU/nFgfjj0
+w+blTdMbUkQRIes2fBg7PB4tERZr4nlkVLB5bOlxCfidZ0vJV/g=
+=9aoe
+-----END PGP SIGNATURE-----

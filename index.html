@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>brimlim apt repository</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body{font:16px/1.6 system-ui,sans-serif;max-width:46rem;margin:4rem auto;padding:0 1rem}
+  pre{background:#111;color:#eee;padding:1rem;border-radius:.5rem;overflow-x:auto}
+</style>
+<h1>brimlim</h1>
+<p>Usage-limit overlay for AI coding assistants.
+<a href="https://github.com/the-wagner-dev/brimlim">Source and documentation</a>.</p>
+<pre><code>curl -fsSL https://the-wagner-dev.github.io/brimlim/brimlim-archive-keyring.gpg | sudo tee /etc/apt/keyrings/brimlim-archive-keyring.gpg &gt; /dev/null
+echo "deb [signed-by=/etc/apt/keyrings/brimlim-archive-keyring.gpg] https://the-wagner-dev.github.io/brimlim stable main" | sudo tee /etc/apt/sources.list.d/brimlim.list
+sudo apt update &amp;&amp; sudo apt install brimlim</code></pre>
