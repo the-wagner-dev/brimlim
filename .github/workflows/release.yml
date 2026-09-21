@@ -26,7 +26,8 @@ jobs:
             build-essential pkg-config curl ca-certificates git file \
             libgtk-4-dev libgtk4-layer-shell-dev libglib2.0-dev-bin \
             gjs gir1.2-gtk-4.0 dpkg-dev fakeroot python3 zip \
-            desktop-file-utils librsvg2-bin rustup
+            desktop-file-utils librsvg2-bin librsvg2-common libgdk-pixbuf2.0-bin \
+            rustup
 
       - uses: actions/checkout@v4
 
@@ -53,6 +54,16 @@ jobs:
         run: |
           ./packaging/appimage/fetch-tools.sh
           ./packaging/appimage/build.sh
+
+      - name: The AppImages actually run
+        # linuxdeploy reports success for a bundle that is missing a library
+        # it never noticed was needed. Starting each one is cheap and is the
+        # only thing that distinguishes "it built" from "it works".
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          ./dist/brimlimd-x86_64.AppImage --version
+          ./dist/brimlim-gtk-x86_64.AppImage --version
 
       - name: Checksums
         run: |

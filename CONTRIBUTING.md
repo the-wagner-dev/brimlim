@@ -54,6 +54,19 @@ an hour otherwise are written up in
 extension module for the life of the Shell process, and `dbus-run-session`
 does not isolate `gsettings` unless `XDG_CONFIG_HOME` is exported *before* it.
 
+## Building the packages
+
+```bash
+./packaging/deb/build.sh
+./packaging/gnome-extension/build.sh
+./packaging/appimage/fetch-tools.sh && ./packaging/appimage/build.sh
+```
+
+The AppImage build needs `librsvg2-common` and `libgdk-pixbuf2.0-bin` as
+well: `linuxdeploy-plugin-gtk` bundles the GTK pieces it finds on the build
+machine rather than the ones the binary links against, and it reports what is
+missing as a path rather than as a package.
+
 ## Adding a provider
 
 Implement `UsageProvider` in `crates/brimlimd/src/providers/`, and add a
