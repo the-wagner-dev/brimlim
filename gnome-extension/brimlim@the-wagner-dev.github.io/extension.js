@@ -3,7 +3,6 @@
 // This file is lifecycle only: settings, monitors, scale, overview, and the
 // daemon connection. The drawing lives in lib/.
 
-import GLib from 'gi://GLib';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
