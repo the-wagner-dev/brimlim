@@ -21,7 +21,7 @@ brimlim sits collapsed against a screen edge as a 4-pixel tongue. Hover it and
 a black pill grows out with one ring per assistant: the arc is the most
 constraining usage window, the mark says which assistant, the number under it
 is the percentage. Click a ring for the full card — every window, when each
-resets, and which of your sessions are working, waiting or idle.
+resets, and which of your sessions are working right now.
 
 It is three pieces that do not share a process: a Rust daemon with no GUI, a
 GNOME Shell extension, and a GTK4 layer-shell frontend for Hyprland, KWin and
@@ -59,7 +59,7 @@ Download `brimlim_<version>_amd64.deb` from
 [Releases](https://github.com/the-wagner-dev/brimlim/releases) and:
 
 ```bash
-sudo apt install ./brimlim_0.1.0_amd64.deb
+sudo apt install ./brimlim_0.1.1_amd64.deb
 ```
 
 ### AppImage
@@ -99,7 +99,7 @@ no number at all. Nothing is estimated from token counts.
 
 | | source | how |
 |---|---|---|
-| **Claude** | `api.anthropic.com/api/oauth/usage` | the OAuth token Claude Code already refreshed into `~/.claude/.credentials.json`, asked at most once every five minutes. Sessions from `~/.claude/sessions/<pid>.json`. |
+| **Claude** | `api.anthropic.com/api/oauth/usage` | the OAuth token Claude Code already refreshed into `~/.claude/.credentials.json`, asked at most once every five minutes. Sessions — and their `busy`/`idle` status — from `~/.claude/sessions/<pid>.json`, the registry the CLI keeps of itself. |
 | **Codex** | `~/.codex/sessions/**` | Codex writes the server's own `rate_limits` payload into every rollout log, so there is no second API call at all. Sessions from `/proc`. |
 
 brimlim never refreshes anyone's OAuth token — that would race the CLI for the
@@ -111,17 +111,26 @@ More providers go behind the same `UsageProvider` trait; see
 
 ### Activity
 
-There is no portable "is the assistant thinking" API, so two honest signals
-are combined per session: the process is burning CPU, and its log grew
-recently.
+Claude Code writes its own status into its session registry — `busy` while it
+is working a turn — so for Claude that question is answered first-hand rather
+than inferred. Codex keeps no registry, so it is watched from the outside
+instead: the process is burning CPU, or its log grew in the last few seconds.
 
 | | |
 |---|---|
-| `working` | burning ≥ 0.12 of a core, or wrote to its log in the last 6s |
-| `waiting` | alive and used within 30 min, but not computing |
+| `working` | Claude says `busy`; or, for Codex, ≥ 0.12 of a core or a log write in the last 6s |
 | `idle` | anything else |
+| `waiting` | *nothing produces this today* — see below |
 
-Neither signal ever becomes a usage percentage.
+`waiting` means "this one has asked you something and is waiting on your
+answer". No assistant on Linux reports that, so brimlim does not claim it. It
+used to: a session that was alive, used in the last half hour and not
+computing was reported as waiting, which is a description of you reading your
+screen rather than of an agent that wants you — and the notch spent its time
+interrupting people over questions nobody had been asked. The state stays in
+the schema for a provider that can one day answer it honestly.
+
+None of these signals ever becomes a usage percentage.
 
 ## Honesty
 
@@ -207,7 +216,8 @@ field never breaks a running frontend.
 ```
 
 * `status`: `ok | stale | needs_auth | error`
-* `activity`: `idle | busy | waiting`
+* `activity`: `idle | busy | waiting` — nothing emits `waiting` today; see
+  [Activity](#activity)
 * `fidelity`: `official | derived | manual`
 * `headline_percent` is the most constraining window, and is `null` whenever
   there is nothing real to show.
@@ -234,14 +244,21 @@ spokes of the Claude burst, and the Codex rosette breathes. There is no
 separate spinner — the thing that moves is the thing that says which
 assistant is busy.
 
-When a session stops working, or starts waiting on you, the notch comes out
-by itself for five seconds and the waiting session's ring gets a **blue**
-pulse around it. Blue, and never orange or red: colour in this product means
-one thing only, how close you are to a limit, so "this one wants you" has to
-sit off that grade entirely. The first state after startup announces nothing,
-so logging in does not chime once per open session, and both halves have
-their own switch — turn off `reveal-on-activity` and the notch will only ever
-appear when you hover it.
+When a session that **was working** stops, the notch comes out by itself for
+five seconds and chimes. That is the only thing it interrupts you for, and it
+is a transition a provider actually witnessed rather than one inferred from a
+quiet CPU. The first state after startup announces nothing, so logging in
+does not replay a chime per open session, and both halves have their own
+switch:
+
+```bash
+gsettings set org.gnome.shell.extensions.brimlim reveal-on-activity false
+gsettings set org.gnome.shell.extensions.brimlim sound-on-activity false
+```
+
+A provider that could report `waiting` would get a blue pulse around its
+ring — blue, and never orange or red, because colour here means one thing
+only, how close you are to a limit.
 
 `auto-hide` (the default), `always-visible` and `hidden` are the three modes.
 Edge, monitor, whether to stay up in fullscreen and in the overview, and
@@ -297,9 +314,10 @@ update mechanism.
 
 ## Status
 
-v0.1.0. The daemon, both frontends and the packaging are built and tested.
-The GTK frontend has not yet been run on a real layer-shell compositor —
-if you use Hyprland, KWin or sway,
+v0.1.1. The daemon, both frontends and the packaging are built and tested,
+and the GNOME extension is checked against a real GNOME 50 Shell on every
+change. The GTK frontend has not yet been run on a real layer-shell
+compositor — if you use Hyprland, KWin or sway,
 [a report is worth a lot](https://github.com/the-wagner-dev/brimlim/issues).
 
 Contributions welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).

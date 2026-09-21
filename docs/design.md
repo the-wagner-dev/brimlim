@@ -123,17 +123,41 @@ keeps no registry.
 
 ### Activity
 
-There is no portable "is the assistant thinking" API, so two honest signals are
-combined per session: the process is burning CPU, and its log grew recently.
+Claude Code keeps a registry of its own live CLIs at
+`~/.claude/sessions/<pid>.json`, and writes a `status` into it: `busy` while
+it is working a turn. That is a first-hand account, so for Claude it is taken
+as the answer and the process is not second-guessed. Codex keeps no registry,
+so it is watched from the outside: burning ≥ 0.12 of a core, or a log write
+in the last 6 seconds, means mid-turn.
 
 | | |
 |---|---|
-| `working` | burning ≥ 0.12 of a core, or wrote to its log in the last 6s |
-| `waiting` | alive and used within 30 min, but not computing |
+| `working` | Claude reports `busy`; or, without a registry, CPU or a fresh log write |
 | `idle` | anything else |
+| `waiting` | nothing produces this |
 
-A provider is `busy` if any session is working, `waiting` if any is waiting.
-Neither signal ever becomes a usage percentage.
+A provider is `busy` if any session is working. None of it ever becomes a
+usage percentage.
+
+#### Why `waiting` has no source
+
+`waiting` means "this one has asked you something". It used to be inferred:
+alive, used in the last half hour, not computing. That is a description of a
+person reading their screen, and it was true of every session anyone had
+touched recently — so the notch revealed itself, chimed, and pulsed a ring at
+people who had not been asked anything. The report was not a near miss; it
+was measuring a different thing and putting the wrong name on it.
+
+The rule this project applies to percentages applies here too: a frontend may
+only show what a source actually said. No assistant on Linux says "I am
+waiting for your answer", so nothing claims it. The state stays in the schema
+because the day one of them does say it, there will be somewhere to put it —
+and the blue pulse is already drawn for it.
+
+The announce policy narrowed with it. A reveal is an interruption, and the
+only transition worth one is a session that *was* working and has stopped:
+a provider watched that happen. Entering `waiting` from anything at all used
+to be a second trigger, and it was the one that fired spontaneously.
 
 ## Talking to the daemon from elsewhere
 

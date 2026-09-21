@@ -17,7 +17,9 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use super::{PollCtx, UsageProvider, mtime, roll_up_activity, session_state, workspace_name};
-use crate::model::{Fidelity, Reading, Session, Status, Usage, Window, fraction_from_percent};
+use crate::model::{
+    Fidelity, Reading, Session, SessionState, Status, Usage, Window, fraction_from_percent,
+};
 use crate::util::{paths, proc::CpuSampler};
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
@@ -172,12 +174,17 @@ impl ClaudeProvider {
                 if !crate::util::proc::is_alive(entry.pid) {
                     return None;
                 }
+                // Sampled either way: the sampler needs two readings of a
+                // pid before it can report a rate, so skipping it on the
+                // first-hand path would leave the fallback blind whenever a
+                // session outlives an upgrade.
                 let burn = cpu.as_mut().and_then(|c| c.sample(entry.pid));
                 let last_write = transcripts.mtime_of(&entry.session_id);
                 Some(Session {
                     name: entry.display_name(),
                     pid: entry.pid,
-                    state: session_state(burn, last_write),
+                    state: state_from_status(entry.status.as_deref())
+                        .unwrap_or_else(|| session_state(burn, last_write)),
                 })
             })
             .collect();
@@ -337,6 +344,27 @@ struct SessionFile {
     session_id: String,
     cwd: Option<String>,
     name: Option<String>,
+    /// Claude Code's own verdict on what this session is doing: `busy` while
+    /// it is working a turn, `idle` when it is not. It is written by the CLI
+    /// itself, which makes it the only first-hand account of agent activity
+    /// available on this machine — everything else is inference from the
+    /// outside. Absent on CLI versions that predate the field, which is the
+    /// one case where we fall back to guessing.
+    status: Option<String>,
+}
+
+/// What Claude Code's own registry says a session is doing, or `None` when
+/// the CLI is too old to have written it down and we have to fall back to
+/// watching it from the outside.
+fn state_from_status(status: Option<&str>) -> Option<SessionState> {
+    match status? {
+        "busy" => Some(SessionState::Working),
+        // Anything the CLI does not call `busy`, it is not doing. In
+        // particular it is not "waiting on you": Claude Code reports whether
+        // it is working, never whether it has asked you something, and the
+        // difference is the whole reason this function exists.
+        _ => Some(SessionState::Idle),
+    }
 }
 
 impl SessionFile {
@@ -480,7 +508,32 @@ mod tests {
             session_id: "s".to_owned(),
             cwd: Some("/mnt/data/Dev/git/prototypes/brimlim".to_owned()),
             name: None,
+            status: None,
         };
         assert_eq!(entry.display_name(), "brimlim");
+    }
+
+    #[test]
+    fn the_cli_gets_the_last_word_on_what_it_is_doing() {
+        assert_eq!(state_from_status(Some("busy")), Some(SessionState::Working));
+        assert_eq!(state_from_status(Some("idle")), Some(SessionState::Idle));
+    }
+
+    #[test]
+    fn an_unrecognised_status_is_not_working_and_is_never_waiting() {
+        // A future CLI could add a status we have not seen. Whatever it
+        // means, it does not mean "this agent has asked you something" —
+        // only a signal that says so may produce Waiting.
+        for status in ["compacting", "paused", ""] {
+            assert_eq!(state_from_status(Some(status)), Some(SessionState::Idle));
+        }
+    }
+
+    #[test]
+    fn a_registry_without_a_status_falls_back_rather_than_guessing_idle() {
+        // Older Claude Code wrote no status at all. Reporting those sessions
+        // as idle would be a claim; falling back to watching the process is
+        // what the heuristic is for.
+        assert_eq!(state_from_status(None), None);
     }
 }

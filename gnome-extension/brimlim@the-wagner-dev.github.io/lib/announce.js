@@ -14,8 +14,14 @@ function sessionsByPid(provider) {
 }
 
 /**
- * Moments worth a reveal: a session that was working has stopped, or has
- * started waiting on the human.
+ * Moments worth a reveal: a session that was working has stopped.
+ *
+ * There used to be a second rule — any session entering `waiting` — and it
+ * was the reason the notch interrupted people who had not been asked
+ * anything: the providers reached `waiting` by noticing a session was not
+ * computing, which is not the same thing at all. A reveal is an
+ * interruption, so it is only spent on a transition a provider actually
+ * witnessed.
  *
  * `previous` is null for the first state of a session, which deliberately
  * announces nothing — otherwise every login would chime once per session
@@ -47,8 +53,6 @@ export function transitions(previous, next) {
                     session: session.name,
                     kind: session.state === WAITING ? 'waiting' : 'finished',
                 });
-            } else if (was.state !== WAITING && session.state === WAITING) {
-                events.push({providerId: provider.id, session: session.name, kind: 'waiting'});
             }
         }
 

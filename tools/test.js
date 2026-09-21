@@ -62,6 +62,15 @@ check('a session that starts waiting is announced once, not twice', () => {
     equal(events.length, 1);
     equal(events[0].kind, 'waiting');
 });
+check('a session that was never working buys no interruption', () => {
+    // The regression this exists for: every session that simply was not
+    // computing used to be called "waiting on you" and got itself a reveal.
+    for (const landed of ['idle', 'waiting']) {
+        equal(transitions(
+            state([session(1, 'repo', 'idle')]),
+            state([session(1, 'repo', landed)])), [], `idle -> ${landed}`);
+    }
+});
 check('a session that vanishes mid-turn counts as finished', () => {
     const events = transitions(state([session(1, 'repo', 'working')]), state([]));
     equal(events, [{providerId: 'claude', session: 'repo', kind: 'finished'}]);

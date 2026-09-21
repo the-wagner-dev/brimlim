@@ -15,9 +15,6 @@ use crate::model::{Activity, Fidelity, Reading, Session, SessionState};
 const BUSY_CPU_FRACTION: f64 = 0.12;
 /// A log that grew this recently means the agent is mid-turn.
 const BUSY_WRITE_WINDOW: Duration = Duration::from_secs(6);
-/// After this much silence an alive session stops being "waiting on you" and
-/// is just sitting there.
-const WAITING_WINDOW: Duration = Duration::from_secs(30 * 60);
 
 pub struct PollCtx {
     /// Set when the frontend asked for this provider explicitly; bypasses
@@ -62,15 +59,22 @@ pub fn roll_up_activity(sessions: &[Session]) -> Activity {
 
 /// The shared verdict for one session, from the two signals we trust:
 /// CPU burn and log growth. `cpu` is `None` on the first sample of a pid.
+///
+/// It answers exactly one question — is this session computing right now —
+/// and deliberately cannot return [`SessionState::Waiting`].
+///
+/// It used to: "alive, used in the last half hour, not computing" was
+/// reported as waiting on the human. That describes someone reading their
+/// screen, not an agent that has asked them something, and the notch spent
+/// its time revealing itself over questions nobody had been asked. Not
+/// computing is not the same as wanting you, and there is no signal here for
+/// the second, so this returns nothing about it.
 pub fn session_state(cpu: Option<f64>, last_write: Option<SystemTime>) -> SessionState {
-    let age = last_write.and_then(|t| SystemTime::now().duration_since(t).ok());
-
     if cpu.is_some_and(|c| c >= BUSY_CPU_FRACTION) {
         return SessionState::Working;
     }
-    match age {
+    match last_write.and_then(|t| SystemTime::now().duration_since(t).ok()) {
         Some(age) if age <= BUSY_WRITE_WINDOW => SessionState::Working,
-        Some(age) if age <= WAITING_WINDOW => SessionState::Waiting,
         _ => SessionState::Idle,
     }
 }
@@ -158,12 +162,13 @@ mod tests {
     }
 
     #[test]
-    fn a_recent_turn_is_waiting_on_the_human() {
+    fn a_session_that_stopped_computing_is_idle_not_waiting_on_you() {
+        // A minute ago it wrote to its log; right now it is burning nothing.
+        // That is a session sitting there while you read the screen. The
+        // heuristic has no way to tell it from one that asked you a
+        // question, so it must not claim the difference.
         let recent = SystemTime::now() - Duration::from_secs(60);
-        assert_eq!(
-            session_state(Some(0.0), Some(recent)),
-            SessionState::Waiting
-        );
+        assert_eq!(session_state(Some(0.0), Some(recent)), SessionState::Idle);
     }
 
     #[test]

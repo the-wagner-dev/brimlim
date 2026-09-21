@@ -22,8 +22,14 @@ fn sessions_by_pid(provider: &Provider) -> HashMap<i32, &brimlim_model::Session>
     provider.sessions.iter().map(|s| (s.pid, s)).collect()
 }
 
-/// Moments worth a reveal: a session that was working has stopped, or has
-/// started waiting on the human.
+/// Moments worth a reveal: a session that was working has stopped.
+///
+/// There used to be a second rule — any session entering `Waiting` — and it
+/// was the reason the notch interrupted people who had not been asked
+/// anything: the providers reached `Waiting` by noticing a session was not
+/// computing, which is not the same thing at all. A reveal is an
+/// interruption, so it is only spent on a transition a provider actually
+/// witnessed.
 ///
 /// `previous` is `None` for the first state after startup, which deliberately
 /// announces nothing — otherwise every launch would chime once per session
@@ -60,12 +66,6 @@ pub fn transitions(previous: Option<&State>, next: &State) -> Vec<Event> {
                     } else {
                         Kind::Finished
                     },
-                });
-            } else if was.state != SessionState::Waiting && session.state == SessionState::Waiting {
-                events.push(Event {
-                    provider_id: provider.id.clone(),
-                    session: session.name.clone(),
-                    kind: Kind::Waiting,
                 });
             }
         }
@@ -135,6 +135,22 @@ mod tests {
         let events = transitions(Some(&before), &after);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Waiting);
+    }
+
+    #[test]
+    fn a_session_that_was_never_working_buys_no_interruption() {
+        // The regression this exists for: every session that simply was not
+        // computing used to be called "waiting on you" and got itself a
+        // reveal. Nothing about a session that was not working is an event,
+        // whatever state it lands in.
+        let before = state(vec![session(1, SessionState::Idle)]);
+        for landed in [SessionState::Idle, SessionState::Waiting] {
+            let after = state(vec![session(1, landed)]);
+            assert!(
+                transitions(Some(&before), &after).is_empty(),
+                "idle -> {landed:?} should not interrupt anyone"
+            );
+        }
     }
 
     #[test]
