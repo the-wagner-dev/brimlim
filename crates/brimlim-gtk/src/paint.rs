@@ -3,7 +3,7 @@
 //! a reading gets a muted tick and a dash, never an arc that could be read
 //! as a number.
 
-use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, PI, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use brimlim_model::{Activity, Fidelity, Provider, SessionState, Status};
 use chrono::Utc;
@@ -14,7 +14,6 @@ use crate::geometry::{CARD_TAIL, Edge, RING_STROKE};
 use crate::palette::{self, DISC, TRACK, UNKNOWN, WAITING, usage_color};
 
 const START_ANGLE: f64 = -FRAC_PI_2;
-const SPIN_SWEEP: f64 = FRAC_PI_3;
 
 fn stroke(cr: &Context) {
     if let Err(error) = cr.stroke() {
@@ -166,12 +165,25 @@ fn draw_text_centered(
 /// The provider's mark. Drawn rather than set as text: at 38 logical pixels a
 /// font glyph is at the mercy of whatever the user has installed, and these
 /// shapes are simple enough to own.
-pub fn draw_mark(cr: &Context, id: &str, cx: f64, cy: f64, radius: f64, alpha: f64) {
+pub fn draw_mark(
+    cr: &Context,
+    id: &str,
+    cx: f64,
+    cy: f64,
+    radius: f64,
+    alpha: f64,
+    phase: Option<f64>,
+) {
     cr.set_source_rgba(1.0, 1.0, 1.0, alpha);
     cr.set_line_cap(gtk4::cairo::LineCap::Round);
 
     if id == "codex" {
-        draw_rosette(cr, cx, cy, radius);
+        // A filled shape cannot shimmer spoke by spoke, so it breathes.
+        let breath = match phase {
+            Some(phase) => 0.93 + 0.07 * (0.5 + 0.5 * (TAU * phase).cos()),
+            None => 1.0,
+        };
+        draw_rosette(cr, cx, cy, radius * breath);
         return;
     }
 
@@ -182,7 +194,18 @@ pub fn draw_mark(cr: &Context, id: &str, cx: f64, cy: f64, radius: f64, alpha: f
     for i in 0..spokes {
         let angle = f64::from(i) / f64::from(spokes) * TAU - FRAC_PI_2;
         let inner = radius * 0.16;
-        let outer = radius * if i % 2 == 0 { 1.0 } else { 0.82 };
+
+        // At rest the spokes alternate long and short. While the agent is
+        // working that alternation becomes a wave running round the mark.
+        let (outer, lit) = match phase {
+            Some(phase) => {
+                let wave = 0.5 + 0.5 * (TAU * (phase - f64::from(i) / f64::from(spokes))).cos();
+                (radius * (0.74 + 0.3 * wave), 0.4 + 0.6 * wave)
+            }
+            None => (radius * if i % 2 == 0 { 1.0 } else { 0.82 }, 1.0),
+        };
+
+        cr.set_source_rgba(1.0, 1.0, 1.0, alpha * lit);
         cr.new_path();
         cr.move_to(cx + angle.cos() * inner, cy + angle.sin() * inner);
         cr.line_to(cx + angle.cos() * outer, cy + angle.sin() * outer);
@@ -322,21 +345,10 @@ pub fn paint_cell(
         &provider.id,
         center,
         center,
-        radius * 0.42,
+        radius * 0.48,
         if known { 1.0 } else { 0.5 },
+        (provider.activity == Activity::Busy).then_some(phase),
     );
-
-    if provider.activity == Activity::Busy {
-        let inner = radius - stroke_width - (4.0 * scale).round();
-        if inner > 0.0 {
-            let from = START_ANGLE + phase * TAU;
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.75);
-            cr.set_line_width((1.5 * scale).round().max(1.0));
-            cr.new_path();
-            cr.arc(center, center, inner, from, from + SPIN_SWEEP);
-            stroke(cr);
-        }
-    }
 
     if provider.activity == Activity::Waiting {
         palette::set_color(cr, WAITING, 0.15 + 0.5 * pulse);
@@ -442,6 +454,7 @@ pub fn draw_card(
         y + 8.0 * scale,
         8.0 * scale,
         1.0,
+        None,
     );
     draw_text(
         cr,

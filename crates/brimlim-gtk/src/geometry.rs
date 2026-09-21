@@ -2,6 +2,8 @@
 //! `lib/geometry.js`. The two frontends must agree to the pixel, so the
 //! constants are kept in the same order and with the same names.
 
+use std::f64::consts::PI;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Edge {
     Top,
@@ -49,9 +51,115 @@ pub const CARD_WIDTH: f64 = 280.0;
 pub const CARD_GAP: f64 = 10.0;
 pub const CARD_TAIL: f64 = 9.0;
 
-pub const REVEAL_MS: u32 = 180;
+pub const REVEAL_MS: u32 = 420;
+pub const COLLAPSE_MS: u32 = 260;
 pub const COLLAPSE_DELAY_MS: u32 = 400;
 pub const AUTO_REVEAL_MS: u32 = 5000;
+
+// -- the reveal -----------------------------------------------------------
+//
+// The notch does not slide out; it grows out. The shape is a pure function
+// of one 0..1 progress value, which is what lets both frontends animate
+// identically without sharing a line of drawing code. Transliterated from
+// `lib/geometry.js`; the reference fixture keeps the two honest.
+
+/// Phase boundaries along that single timeline. They overlap on purpose: the
+/// drop is still swelling when it starts to spread, which is what stops the
+/// two halves reading as two separate animations.
+pub const DROP_END: f64 = 0.40;
+pub const STRETCH_FROM: f64 = 0.30;
+pub const STRETCH_TO: f64 = 0.88;
+pub const CELLS_FROM: f64 = 0.72;
+/// How far the drop flattens while it spreads. Surface tension, not a
+/// bounce: the shape never grows past the pill's own box.
+pub const FLATTEN: f64 = 0.07;
+
+pub fn clamp01(value: f64) -> f64 {
+    if value.is_nan() {
+        return 0.0;
+    }
+    value.clamp(0.0, 1.0)
+}
+
+pub fn ease_out_cubic(t: f64) -> f64 {
+    1.0 - (1.0 - clamp01(t)).powi(3)
+}
+
+/// Slow at both ends. The stretch uses this rather than an ease-out so that
+/// the drop is still a drop when it stops swelling.
+pub fn ease_in_out_cubic(t: f64) -> f64 {
+    let p = clamp01(t);
+    if p < 0.5 {
+        4.0 * p * p * p
+    } else {
+        1.0 - (-2.0 * p + 2.0).powi(3) / 2.0
+    }
+}
+
+/// The pill's drawn — and owned — box at reveal progress `t`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RevealShape {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    /// The rounding is part of the morph: a drop is round, a pill is not.
+    pub radius: f64,
+    pub flare: f64,
+    /// The marks arrive last, on a shape that has already settled.
+    pub cells: f64,
+    /// The tongue is the collapsed state's only visible part, so it goes as
+    /// soon as anything else is there to see.
+    pub tongue: f64,
+}
+
+/// See `revealShape` in the extension: at `t = 0` this is nothing, at `t = 1`
+/// it is the whole pill, and in between it leaves the edge as a disc and then
+/// stretches along it.
+pub fn reveal_shape(edge: Edge, (width, height): (f64, f64), t: f64) -> RevealShape {
+    let progress = clamp01(t);
+    let vertical = edge.is_vertical();
+    let full = if vertical { width } else { height }; // depth, away from the edge
+    let span = if vertical { height } else { width }; // length, along the edge
+
+    let swell = ease_out_cubic(progress / DROP_END);
+    let stretch = ease_in_out_cubic((progress - STRETCH_FROM) / (STRETCH_TO - STRETCH_FROM));
+
+    // The drop grows out of the tongue's own footprint, and is about as long
+    // as it is deep, so it leaves the edge round. Seeding it with the longer
+    // of the two is not a detail: a drop shorter than the tongue would leave
+    // the pointer that summoned it outside the shape, and the notch would
+    // collapse under the very pointer holding it open.
+    let seed = full.max(TONGUE_LENGTH);
+    let along = span.min(seed + (span - seed) * stretch);
+    let depth = full * swell * (1.0 - FLATTEN * (PI * stretch).sin());
+
+    let w = (if vertical { depth } else { along }).round();
+    let h = (if vertical { along } else { depth }).round();
+
+    // Half the short side is a disc; the pill's own radius is the end state.
+    let half = w.min(h) / 2.0;
+    let radius = half.min(half + (PILL_RADIUS - half) * stretch);
+    let flare = (FLARE * stretch).min(along / 2.0);
+
+    let (x, y) = match edge {
+        Edge::Right => (width - w, ((height - h) / 2.0).round()),
+        Edge::Left => (0.0, ((height - h) / 2.0).round()),
+        Edge::Top => (((width - w) / 2.0).round(), 0.0),
+        Edge::Bottom => (((width - w) / 2.0).round(), height - h),
+    };
+
+    RevealShape {
+        x,
+        y,
+        width: w,
+        height: h,
+        radius,
+        flare,
+        cells: ease_out_cubic((progress - CELLS_FROM) / (1.0 - CELLS_FROM)),
+        tongue: 1.0 - clamp01(progress / STRETCH_FROM),
+    }
+}
 
 /// A cell is a ring with room for its pulse, and its percentage underneath.
 pub fn cell_width() -> f64 {

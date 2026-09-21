@@ -21,6 +21,16 @@ const TRACK = [1.00, 1.00, 1.00, 0.10];
 const DISC = [0.17, 0.17, 0.18, 1.00];
 /** Used wherever there is no number — never a usage colour. */
 const UNKNOWN = [0.70, 0.73, 0.78, 0.55];
+/**
+ * "This one is waiting for you" — also never a usage colour.
+ *
+ * It used to be ORANGE, and that was a real mistake: the pulse is drawn as a
+ * ring right outside the usage arc, so a session politely waiting for a reply
+ * looked exactly like a window about to hit its limit. Colour in this product
+ * means one thing, how close you are to the wall, and anything that is not
+ * that has to sit off the grade entirely.
+ */
+const WAITING = [0.42, 0.70, 1.00];
 
 function lerp(a, b, t) {
     return a.map((value, i) => value + (b[i] - value) * t);
@@ -43,7 +53,7 @@ export const Colors = {
     track: TRACK,
     disc: DISC,
     unknown: UNKNOWN,
-    waiting: ORANGE,
+    waiting: WAITING,
 };
 
 /** Apply an [r,g,b] or [r,g,b,a] to a Cairo context. */

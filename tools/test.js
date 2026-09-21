@@ -9,9 +9,10 @@
 import {transitions} from '../gnome-extension/brimlim@the-wagner-dev.github.io/lib/announce.js';
 import {Edge} from '../gnome-extension/brimlim@the-wagner-dev.github.io/lib/edges.js';
 import {formatAge, formatReset} from '../gnome-extension/brimlim@the-wagner-dev.github.io/lib/format.js';
-import {Metrics, pillSize, placement, setScale, tongueBox}
+import {Metrics, Reveal, pillSize, placement, revealShape, setScale, tongueBox}
     from '../gnome-extension/brimlim@the-wagner-dev.github.io/lib/geometry.js';
-import {usageColor} from '../gnome-extension/brimlim@the-wagner-dev.github.io/lib/palette.js';
+import {Colors, usageColor}
+    from '../gnome-extension/brimlim@the-wagner-dev.github.io/lib/palette.js';
 
 let failures = 0;
 let count = 0;
@@ -104,7 +105,6 @@ check('placement is identical in logical pixels across scales', () => {
 
     equal(spot2.x / 2, spot1.x);
     equal(spot2.y / 2, spot1.y);
-    equal(spot2.hiddenOffset.map(v => v / 2), spot1.hiddenOffset);
 });
 check('every edge anchors flush against its own side', () => {
     setScale(1);
@@ -121,14 +121,64 @@ check('every edge anchors flush against its own side', () => {
         }
     }
 });
-check('the hidden offset always moves the pill out through its own edge', () => {
+check('the reveal starts at nothing and ends at the whole pill', () => {
     setScale(1);
-    const size = pillSize(Edge.LEFT, 1);
-    equal(placement(Edge.LEFT, {x: 0, y: 0, width: 800, height: 600}, size).hiddenOffset,
-        [-size[0], 0]);
-    const top = pillSize(Edge.TOP, 1);
-    equal(placement(Edge.TOP, {x: 0, y: 0, width: 800, height: 600}, top).hiddenOffset,
-        [0, -top[1]]);
+    for (const edge of [Edge.TOP, Edge.RIGHT, Edge.BOTTOM, Edge.LEFT]) {
+        const size = pillSize(edge, 3);
+        const start = revealShape(edge, size, 0);
+        equal([start.width, start.height].includes(0), true, `${edge} starts at nothing`);
+        equal(start.tongue, 1, `${edge} rests on its tongue`);
+
+        const end = revealShape(edge, size, 1);
+        equal([end.x, end.y, end.width, end.height], [0, 0, ...size], `${edge} ends full`);
+        equal([end.radius, end.flare], [Metrics.pillRadius, Metrics.flare], `${edge} ends as a pill`);
+        equal([end.cells, end.tongue], [1, 0], `${edge} ends showing its marks`);
+    }
+});
+check('the drop leaves the edge round, and only then spreads', () => {
+    setScale(1);
+    const size = pillSize(Edge.RIGHT, 3);
+    const [depth] = size;
+
+    const drop = revealShape(Edge.RIGHT, size, Reveal.dropEnd);
+    // A drop, not a smear: when the swell finishes, the blob has barely
+    // started along the edge and still reads as round.
+    const seed = Math.max(depth, Metrics.tongueLength);
+    assert(drop.height <= seed * 1.15,
+        `at the end of the swell it should still be about as long as it started (${seed}), got ${drop.height}`);
+    assert(drop.radius >= Math.min(drop.width, drop.height) / 2 - 0.51,
+        'a drop is round, not rounded');
+    equal(drop.cells, 0, 'nothing is drawn on a drop');
+
+    // The drop has to cover the tongue that summoned it from the first
+    // frame it exists, or the pointer holding the notch open ends up outside
+    // the shape and the notch collapses under its own reveal.
+    for (let step = 1; step <= 20; step += 1) {
+        const {height} = revealShape(Edge.RIGHT, size, step / 20);
+        assert(height >= Metrics.tongueLength,
+            `the blob is shorter than the tongue at ${step / 20}: ${height}`);
+    }
+
+    // Growth is monotonic along the edge: a blob that shrank mid-flight
+    // would read as a stutter rather than as a flow.
+    let previous = 0;
+    for (let step = 0; step <= 20; step += 1) {
+        const {height} = revealShape(Edge.RIGHT, size, step / 20);
+        assert(height >= previous - 0.51, `length went backwards at ${step / 20}`);
+        previous = height;
+    }
+});
+check('the pill never grows past the box it is given', () => {
+    setScale(2);
+    for (const edge of [Edge.TOP, Edge.RIGHT, Edge.BOTTOM, Edge.LEFT]) {
+        const size = pillSize(edge, 2);
+        for (let step = 0; step <= 20; step += 1) {
+            const s = revealShape(edge, size, step / 20);
+            assert(s.x >= 0 && s.y >= 0, `${edge} left its box at ${step / 20}`);
+            assert(s.x + s.width <= size[0] && s.y + s.height <= size[1],
+                `${edge} overflowed its box at ${step / 20}`);
+        }
+    }
 });
 
 print('format');
@@ -170,6 +220,20 @@ check('redness only ever increases with usage', () => {
         const [r] = usageColor(p);
         assert(r >= previous - 1e-9, `red went backwards at ${p.toFixed(2)}`);
         previous = r;
+    }
+});
+check('the waiting pulse is never mistakable for a usage colour', () => {
+    // The pulse is drawn as a ring immediately outside the usage arc. If it
+    // sat anywhere near the grade, a session politely waiting for a reply
+    // would read as a window about to hit its limit.
+    for (let step = 0; step <= 100; step += 1) {
+        const grade = usageColor(step / 100);
+        const distance = Math.hypot(
+            grade[0] - Colors.waiting[0],
+            grade[1] - Colors.waiting[1],
+            grade[2] - Colors.waiting[2]);
+        assert(distance > 0.4,
+            `the waiting pulse is only ${distance.toFixed(2)} from the grade at ${step}%`);
     }
 });
 check('out-of-range input is clamped, not extrapolated', () => {

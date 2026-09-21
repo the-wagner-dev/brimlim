@@ -30,8 +30,8 @@ export const Metrics = {
 };
 
 export const Timing = {
-    revealMs: 180,
-    collapseMs: 160,
+    revealMs: 420,
+    collapseMs: 260,
     collapseDelayMs: 400,
     autoRevealMs: 5000,
     spinMs: 1400,
@@ -86,9 +86,10 @@ export function pillSize(edge, count) {
 }
 
 /**
- * Where the container sits on its monitor, and how far the pill travels to
- * hide. The container is anchored so that an un-translated pill sits flush
- * against the edge.
+ * Where the container sits on its monitor. It is anchored so that a fully
+ * revealed pill sits flush against the edge; everything the notch does while
+ * it is less than fully revealed happens inside this box, which is why the
+ * container never moves.
  */
 export function placement(edge, monitor, [width, height]) {
     switch (edge) {
@@ -96,26 +97,22 @@ export function placement(edge, monitor, [width, height]) {
         return {
             x: monitor.x,
             y: monitor.y + Math.round((monitor.height - height) / 2),
-            hiddenOffset: [-width, 0],
         };
     case Edge.RIGHT:
         return {
             x: monitor.x + monitor.width - width,
             y: monitor.y + Math.round((monitor.height - height) / 2),
-            hiddenOffset: [width, 0],
         };
     case Edge.TOP:
         return {
             x: monitor.x + Math.round((monitor.width - width) / 2),
             y: monitor.y,
-            hiddenOffset: [0, -height],
         };
     case Edge.BOTTOM:
     default:
         return {
             x: monitor.x + Math.round((monitor.width - width) / 2),
             y: monitor.y + monitor.height - height,
-            hiddenOffset: [0, height],
         };
     }
 }
@@ -151,4 +148,113 @@ export function tongueBox(edge, [width, height]) {
     default:
         return [Math.round((width - length) / 2), height - thickness, length, thickness];
     }
+}
+
+// -- the reveal -----------------------------------------------------------
+//
+// The notch does not slide out; it grows out. The shape is a pure function
+// of one 0..1 progress value, which is what lets both frontends animate
+// identically without sharing a line of drawing code.
+
+export const Reveal = {
+    // Phase boundaries along that single timeline. They overlap on purpose:
+    // the drop is still swelling when it starts to spread, which is what
+    // stops the two halves reading as two separate animations.
+    dropEnd: 0.40,
+    stretchFrom: 0.30,
+    stretchTo: 0.88,
+    cellsFrom: 0.72,
+    // How far the drop flattens while it spreads. Surface tension, not a
+    // bounce: the shape never grows past the pill's own box, because that
+    // box is the whole of the room the container has.
+    flatten: 0.07,
+};
+
+export function clamp01(value) {
+    if (!Number.isFinite(value))
+        return 0;
+    return Math.min(1, Math.max(0, value));
+}
+
+export function easeOutCubic(t) {
+    return 1 - Math.pow(1 - clamp01(t), 3);
+}
+
+/**
+ * Slow at both ends. The stretch uses this rather than an ease-out so that
+ * the drop is still a drop when it stops swelling: an ease-out is already a
+ * fifth of the way along the edge by then, and the two beats blur into one
+ * diagonal smear.
+ */
+export function easeInOutCubic(t) {
+    const p = clamp01(t);
+    return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+}
+
+/**
+ * The pill's drawn — and owned — box at reveal progress `t`, inside the
+ * container's own `[width, height]`.
+ *
+ * At `t = 0` it is nothing. It leaves the edge as a disc as deep as the pill
+ * will be, then stretches along the edge into the full shape, and only then
+ * do the cells fade in. `radius` and `flare` are handed back with it because
+ * the rounding is part of the morph: a drop is round, a pill is not.
+ */
+export function revealShape(edge, [width, height], t) {
+    const progress = clamp01(t);
+    const vertical = isVertical(edge);
+    const full = vertical ? width : height;   // depth, away from the edge
+    const span = vertical ? height : width;   // length, along the edge
+
+    const swell = easeOutCubic(progress / Reveal.dropEnd);
+    const stretch = easeInOutCubic(
+        (progress - Reveal.stretchFrom) / (Reveal.stretchTo - Reveal.stretchFrom));
+
+    // The drop grows out of the tongue's own footprint, and is about as long
+    // as it is deep, so it leaves the edge round. Seeding it with the longer
+    // of the two is not a detail: a drop shorter than the tongue would leave
+    // the pointer that summoned it outside the shape, and the notch would
+    // collapse under the very pointer holding it open.
+    const seed = Math.max(full, scaled(Metrics.tongueLength));
+    const along = Math.min(span, seed + (span - seed) * stretch);
+    const depth = full * swell * (1 - Reveal.flatten * Math.sin(Math.PI * stretch));
+
+    const w = Math.round(vertical ? depth : along);
+    const h = Math.round(vertical ? along : depth);
+
+    // Half the short side is a disc; the pill's own radius is the end state.
+    // The min covers both directions, since which one is larger depends on
+    // how deep this edge's pill is.
+    const half = Math.min(w, h) / 2;
+    const radius = Math.min(half, half + (scaled(Metrics.pillRadius) - half) * stretch);
+    const flare = Math.min(scaled(Metrics.flare) * stretch, along / 2);
+
+    let x = 0;
+    let y = 0;
+    switch (edge) {
+    case Edge.RIGHT:
+        x = width - w;
+        y = Math.round((height - h) / 2);
+        break;
+    case Edge.LEFT:
+        y = Math.round((height - h) / 2);
+        break;
+    case Edge.TOP:
+        x = Math.round((width - w) / 2);
+        break;
+    case Edge.BOTTOM:
+    default:
+        x = Math.round((width - w) / 2);
+        y = height - h;
+        break;
+    }
+
+    return {
+        x, y, width: w, height: h, radius, flare,
+        // The marks arrive last, on a shape that has already settled.
+        cells: easeOutCubic((progress - Reveal.cellsFrom) / (1 - Reveal.cellsFrom)),
+        // The tongue is the collapsed state's only visible part, so it goes
+        // as soon as anything else is there to see.
+        tongue: 1 - clamp01(progress / Reveal.stretchFrom),
+    };
 }

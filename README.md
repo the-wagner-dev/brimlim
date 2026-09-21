@@ -18,7 +18,7 @@ an agent is working right now — on a notch at the edge of your Linux screen.**
 ---
 
 brimlim sits collapsed against a screen edge as a 4-pixel tongue. Hover it and
-a black pill slides out with one ring per assistant: the arc is the most
+a black pill grows out with one ring per assistant: the arc is the most
 constraining usage window, the mark says which assistant, the number under it
 is the percentage. Click a ring for the full card — every window, when each
 resets, and which of your sessions are working, waiting or idle.
@@ -214,18 +214,38 @@ field never breaks a running frontend.
 
 ## Behaviour
 
-At rest the notch is a 4×80 logical-pixel tongue. Hovering slides the pill out
-over 180 ms; leaving collapses it after a 400 ms grace period, so clipping the
-corner of the pill on the way somewhere else does not dismiss it. Clicking the
-body pins it open; clicking a ring refreshes that provider and stops there.
+At rest the notch is a 4×80 logical-pixel tongue. Hover it and the notch does
+not slide out — it grows out. A drop swells from the edge, stretches along it
+into the pill, and only then do the marks appear on it; the tongue fades as
+the drop takes over, because once the pill is out there is nothing left for
+the tongue to say.
+
+<img src="assets/reveal.png" width="860" alt="Eight frames of the reveal: the resting tongue, a drop swelling out of the edge, the drop stretching into a pill, and the marks fading in on it. Below, eight frames of the Claude mark with a wave of light running round its spokes.">
+
+That whole animation is one pure function of a 0..1 progress value, written
+once per port and checked frame for frame against the other, so the two
+frontends move identically. Leaving collapses it after a 400 ms grace period,
+so clipping the corner of the pill on the way somewhere else does not dismiss
+it. Clicking the body pins it open; clicking a ring refreshes that provider
+and stops there.
+
+While an agent is working, its mark animates: a wave of light runs round the
+spokes of the Claude burst, and the Codex rosette breathes. There is no
+separate spinner — the thing that moves is the thing that says which
+assistant is busy.
+
+When a session stops working, or starts waiting on you, the notch comes out
+by itself for five seconds and the waiting session's ring gets a **blue**
+pulse around it. Blue, and never orange or red: colour in this product means
+one thing only, how close you are to a limit, so "this one wants you" has to
+sit off that grade entirely. The first state after startup announces nothing,
+so logging in does not chime once per open session, and both halves have
+their own switch — turn off `reveal-on-activity` and the notch will only ever
+appear when you hover it.
 
 `auto-hide` (the default), `always-visible` and `hidden` are the three modes.
 Edge, monitor, whether to stay up in fullscreen and in the overview, and
 whether to chime when an agent finishes are all settings.
-
-When a session stops working or starts waiting for you, the notch comes out
-for five seconds. The first state after startup announces nothing, so logging
-in does not chime once per open session.
 
 ## Two frontends, and why
 
@@ -242,9 +262,9 @@ are two:
 
 The drawing logic is therefore written twice, in GJS/Cairo and Rust/Cairo.
 That is a transliteration rather than a second implementation — and CI checks
-the two ports still agree on 101 points of the colour grade and 16
-edge/count combinations of geometry, so the transliteration cannot rot
-silently.
+the two ports still agree on 101 points of the colour grade, 16 edge/count
+combinations of geometry and 168 frames of the reveal, so the transliteration
+cannot rot silently.
 
 ## Development
 
@@ -252,7 +272,9 @@ silently.
 cargo test                                   # providers on recorded fixtures, engine, CLI
 gjs -m tools/test.js                         # announce policy, HiDPI geometry, formatting, palette
 gjs -m tools/render-preview.js out.png 2     # the GJS drawing, four edges, no Shell needed
+gjs -m tools/render-reveal.js out.png 2      # the reveal and the mark's animation, frame by frame
 cargo run -p brimlim-gtk --example render -- out.png 2
+cargo run -p brimlim-gtk --example reveal -- out.png 2
 tools/nested-shell.sh                        # load the working tree into a throwaway GNOME Shell
 ```
 

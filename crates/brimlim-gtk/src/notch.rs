@@ -1,6 +1,12 @@
 //! The layer-shell notch: two surfaces, a reveal state machine, and the
 //! input region that decides which pixels are ours.
 //!
+//! The notch does not slide out, it grows out: a drop swells from the edge,
+//! stretches along it into the pill, and the marks arrive last. That shape
+//! is `geometry::reveal_shape`, a pure function of one 0..1 value that the
+//! GNOME port computes identically — the reference fixture checks the two
+//! frame for frame.
+//!
 //! Unlike the GNOME 50 port, this frontend really can set an input region —
 //! `gdk::Surface::set_input_region()` maps straight onto
 //! `wl_surface.set_input_region`. It is recomputed on every state change, and
@@ -20,8 +26,9 @@ use gtk4_layer_shell::{Edge as LayerEdge, KeyboardMode, Layer, LayerShell};
 
 use crate::client::DaemonClient;
 use crate::geometry::{
-    AUTO_REVEAL_MS, CARD_GAP, CARD_WIDTH, COLLAPSE_DELAY_MS, Edge, FLARE, PILL_RADIUS, PULSE_ROOM,
-    REVEAL_MS, RING_SIZE, card_height, cell_size, cell_width, pill_size, ring_origin, tongue_box,
+    AUTO_REVEAL_MS, CARD_GAP, CARD_WIDTH, COLLAPSE_DELAY_MS, COLLAPSE_MS, Edge, PULSE_ROOM,
+    REVEAL_MS, RING_SIZE, card_height, cell_size, cell_width, clamp01, pill_size, reveal_shape,
+    ring_origin, tongue_box,
 };
 use crate::paint;
 
@@ -62,6 +69,14 @@ struct Inner {
     hovered: Option<usize>,
     phase: f64,
     pulse: f64,
+    /// How far out the notch is, 0..1. Everything about the shape — its box,
+    /// its rounding, whether the marks are drawn — is a function of this.
+    reveal: f64,
+    reveal_tick: Option<gtk4::TickCallbackId>,
+    /// Whether the blob's pixels are ours. Set false at the *start* of a
+    /// collapse rather than the end: a click aimed at the window underneath
+    /// must not be eaten by a pill on its way out.
+    interactive: bool,
     /// Where the card's tail should point, along the card's own edge.
     tail_at: f64,
     collapse_source: Option<glib::SourceId>,
@@ -74,7 +89,6 @@ pub struct Notch {
     card_area: gtk4::DrawingArea,
     pill: gtk4::DrawingArea,
     tongue: gtk4::DrawingArea,
-    revealer: gtk4::Revealer,
     frame: gtk4::Fixed,
     options: Options,
     client: DaemonClient,
@@ -83,6 +97,7 @@ pub struct Notch {
 
 impl Notch {
     pub fn new(app: &gtk4::Application, options: Options, client: DaemonClient) -> Rc<Self> {
+        let options_mode = options.mode;
         let window = gtk4::ApplicationWindow::builder().application(app).build();
         let card_window = gtk4::ApplicationWindow::builder().application(app).build();
 
@@ -90,16 +105,12 @@ impl Notch {
         let tongue = gtk4::DrawingArea::new();
         let card_area = gtk4::DrawingArea::new();
 
-        let revealer = gtk4::Revealer::builder()
-            .transition_duration(REVEAL_MS)
-            .transition_type(reveal_transition(options.edge))
-            .reveal_child(options.mode == Mode::AlwaysVisible)
-            .child(&pill)
-            .build();
-
+        // No GtkRevealer: the notch does not slide, it grows, and the shape
+        // it grows through is the same pure function the GNOME port uses.
+        // The pill keeps its full box and draws a smaller blob inside it.
         let frame = gtk4::Fixed::new();
         let overlay = gtk4::Overlay::builder().child(&frame).build();
-        overlay.add_overlay(&revealer);
+        overlay.add_overlay(&pill);
         overlay.add_overlay(&tongue);
         window.set_child(Some(&overlay));
         card_window.set_child(Some(&card_area));
@@ -110,7 +121,6 @@ impl Notch {
             card_area,
             pill,
             tongue,
-            revealer,
             frame,
             options,
             client,
@@ -121,6 +131,13 @@ impl Notch {
                 hovered: None,
                 phase: 0.0,
                 pulse: 0.0,
+                reveal: if options_mode == Mode::AlwaysVisible {
+                    1.0
+                } else {
+                    0.0
+                },
+                reveal_tick: None,
+                interactive: options_mode == Mode::AlwaysVisible,
                 tail_at: 0.0,
                 collapse_source: None,
                 reveal_source: None,
@@ -279,10 +296,12 @@ impl Notch {
         self.tongue
             .set_valign(valign_for(self.options.edge, ty, height));
 
-        self.revealer.set_halign(pill_halign(self.options.edge));
-        self.revealer.set_valign(pill_valign(self.options.edge));
+        self.pill.set_halign(pill_halign(self.options.edge));
+        self.pill.set_valign(pill_valign(self.options.edge));
 
-        self.apply_input_region();
+        // Position, size, rounding and the tongue all follow from the
+        // reveal, so there is nothing else to place here.
+        self.set_reveal(self.inner.borrow().reveal);
     }
 
     // -- reveal ----------------------------------------------------------
@@ -374,21 +393,96 @@ impl Notch {
         if self.inner.borrow().expanded {
             return;
         }
-        self.inner.borrow_mut().expanded = true;
-        self.revealer.set_reveal_child(true);
-        self.apply_input_region();
+        {
+            let mut inner = self.inner.borrow_mut();
+            inner.expanded = true;
+            inner.interactive = true;
+        }
+        self.animate_reveal(1.0);
     }
 
     fn collapse(self: &Rc<Self>) {
         if !self.inner.borrow().expanded {
             return;
         }
-        self.inner.borrow_mut().expanded = false;
-        // Surrender input first: the pixels under a departing pill belong to
-        // the window below for the whole of the animation.
-        self.apply_input_region();
+        {
+            let mut inner = self.inner.borrow_mut();
+            inner.expanded = false;
+            // Surrender input first: the pixels under a departing pill
+            // belong to the window below for the whole of the animation.
+            inner.interactive = false;
+        }
         self.hide_card();
-        self.revealer.set_reveal_child(false);
+        self.animate_reveal(0.0);
+    }
+
+    /// Drive the reveal from one 0..1 value.
+    ///
+    /// The drop swelling out of the edge, the stretch along it and the marks
+    /// arriving last are one animation rather than three that have to be kept
+    /// in step, because they all come out of `reveal_shape`.
+    fn animate_reveal(self: &Rc<Self>, target: f64) {
+        if let Some(tick) = self.inner.borrow_mut().reveal_tick.take() {
+            tick.remove();
+        }
+
+        let from = self.inner.borrow().reveal;
+        if (from - target).abs() < 1e-6 {
+            self.set_reveal(target);
+            return;
+        }
+
+        // Reversing mid-flight takes the time it has left, not a whole one,
+        // or a pointer brushing past would leave the pill drifting out long
+        // after the pointer has gone.
+        let span = (target - from).abs();
+        let ms = f64::from(if target > from {
+            REVEAL_MS
+        } else {
+            COLLAPSE_MS
+        });
+        let duration = (ms * span * 1000.0).max(1.0);
+        let started = std::cell::Cell::new(0i64);
+
+        let notch = Rc::clone(self);
+        let tick = self.window.add_tick_callback(move |_widget, clock| {
+            let now = clock.frame_time();
+            if started.get() == 0 {
+                started.set(now);
+            }
+            // Linear: every curve in the animation lives in reveal_shape,
+            // where both frontends can share it.
+            let progress = (((now - started.get()) as f64) / duration).clamp(0.0, 1.0);
+            notch.set_reveal(from + (target - from) * progress);
+
+            if progress >= 1.0 {
+                notch.inner.borrow_mut().reveal_tick = None;
+                return glib::ControlFlow::Break;
+            }
+            glib::ControlFlow::Continue
+        });
+        self.inner.borrow_mut().reveal_tick = Some(tick);
+    }
+
+    fn set_reveal(self: &Rc<Self>, value: f64) {
+        let value = clamp01(value);
+        self.inner.borrow_mut().reveal = value;
+
+        let count = self.inner.borrow().providers.len();
+        let shape = reveal_shape(
+            self.options.edge,
+            pill_size(self.options.edge, count),
+            value,
+        );
+
+        // The tongue is the collapsed state made visible. Once the pill is
+        // out there is nothing left for it to say, so it goes.
+        let wanted = self.options.mode == Mode::AutoHide && shape.tongue > 0.0;
+        self.tongue.set_visible(wanted);
+        self.tongue.set_opacity(shape.tongue);
+
+        self.apply_input_region();
+        self.pill.queue_draw();
     }
 
     fn cancel(self: &Rc<Self>, timer: Timer) {
@@ -414,15 +508,34 @@ impl Notch {
             return;
         };
         let count = self.inner.borrow().providers.len();
-        let (width, height) = pill_size(self.options.edge, count);
-
-        let rect = if self.inner.borrow().expanded {
-            cairo::RectangleInt::new(0, 0, width as i32, height as i32)
-        } else {
-            let (x, y, w, h) = tongue_box(self.options.edge, (width, height));
-            cairo::RectangleInt::new(x as i32, y as i32, w as i32, h as i32)
+        let size = pill_size(self.options.edge, count);
+        let (reveal, interactive) = {
+            let inner = self.inner.borrow();
+            (inner.reveal, inner.interactive)
         };
-        surface.set_input_region(Some(&cairo::Region::create_rectangle(&rect)));
+        let shape = reveal_shape(self.options.edge, size, reveal);
+
+        // The region is the blob itself, recomputed every frame: this port
+        // can hand back the pixels it is not painting, exactly as it stops
+        // painting them.
+        let region = cairo::Region::create();
+        if interactive && shape.width >= 1.0 && shape.height >= 1.0 {
+            let _ = region.union_rectangle(&cairo::RectangleInt::new(
+                shape.x as i32,
+                shape.y as i32,
+                shape.width as i32,
+                shape.height as i32,
+            ));
+        }
+        // The tongue keeps its own pixels for as long as it is visible: the
+        // pointer that summoned the notch is still standing on it.
+        if self.options.mode == Mode::AutoHide && shape.tongue > 0.0 {
+            let (x, y, w, h) = tongue_box(self.options.edge, size);
+            let _ = region.union_rectangle(&cairo::RectangleInt::new(
+                x as i32, y as i32, w as i32, h as i32,
+            ));
+        }
+        surface.set_input_region(Some(&region));
     }
 
     fn clear_card_input_region(self: &Rc<Self>) {
@@ -440,6 +553,10 @@ impl Notch {
     /// Which cell the pointer is over. The whole cell counts, percentage
     /// included: the label belongs to its ring.
     fn ring_at(self: &Rc<Self>, x: f64, y: f64) -> Option<usize> {
+        // Nothing is hittable until the marks are actually there to hit.
+        if self.inner.borrow().reveal < 1.0 {
+            return None;
+        }
         let count = self.inner.borrow().providers.len();
         // A cell is ring-wide and cell-tall on every edge: the percentage
         // sits under its ring whichever way the pill runs.
@@ -519,16 +636,34 @@ impl Notch {
 
     fn draw_pill(&self, cr: &cairo::Context, width: f64, height: f64) {
         let scale = self.scale();
+        let inner = self.inner.borrow();
+        let shape = reveal_shape(self.options.edge, (width, height), inner.reveal);
+        if shape.width < 1.0 || shape.height < 1.0 {
+            return;
+        }
+
+        let _ = cr.save();
+        cr.translate(shape.x, shape.y);
+        // The rounding comes from the shape, not from the constants: halfway
+        // out this is a drop, and a drop has no inverted corners yet.
         paint::draw_pill(
             cr,
             self.options.edge,
-            width,
-            height,
-            FLARE * scale,
-            PILL_RADIUS * scale,
+            shape.width,
+            shape.height,
+            shape.flare,
+            shape.radius,
         );
+        let _ = cr.restore();
 
-        let inner = self.inner.borrow();
+        if shape.cells <= 0.0 {
+            return;
+        }
+
+        // The marks arrive on a shape that has already settled, and they
+        // arrive together: one group, one fade, rather than each ring
+        // dissolving on its own schedule.
+        cr.push_group();
         for (index, provider) in inner.providers.iter().enumerate() {
             let (x, y) = ring_origin(self.options.edge, index);
             let _ = cr.save();
@@ -544,6 +679,8 @@ impl Notch {
             );
             let _ = cr.restore();
         }
+        let _ = cr.pop_group_to_source();
+        let _ = cr.paint_with_alpha(shape.cells);
     }
 
     /// The spinner and the waiting pulse only cost a frame clock while
@@ -628,15 +765,6 @@ fn cross_anchor(edge: Edge) -> LayerEdge {
         LayerEdge::Top
     } else {
         LayerEdge::Left
-    }
-}
-
-fn reveal_transition(edge: Edge) -> gtk4::RevealerTransitionType {
-    match edge {
-        Edge::Right => gtk4::RevealerTransitionType::SlideLeft,
-        Edge::Left => gtk4::RevealerTransitionType::SlideRight,
-        Edge::Top => gtk4::RevealerTransitionType::SlideDown,
-        Edge::Bottom => gtk4::RevealerTransitionType::SlideUp,
     }
 }
 

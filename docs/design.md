@@ -178,15 +178,54 @@ gnome-extensions enable brimlim@the-wagner-dev.github.io
 At rest the notch is collapsed to a 4×80 logical-pixel tongue. The tongue is a
 separate actor that is always present and always reactive — a fully hidden
 window cannot receive a hover, so "hidden" has to mean "collapsed", never
-unmapped. Hovering the tongue slides the pill out over 180 ms (ease-out-cubic);
-leaving collapses it after a 400 ms grace period, so clipping the corner of the
-pill on the way somewhere else does not dismiss it.
+unmapped. Hovering the tongue grows the pill out over 420 ms; leaving
+collapses it over 260 ms after a 400 ms grace period, so clipping the corner
+of the pill on the way somewhere else does not dismiss it. Reversing
+mid-flight takes the time the animation has left rather than a full one.
 
 Clicking the pill body pins it open until the next click. Clicking a ring asks
 the daemon to refresh that provider and stops there — it never falls through
 into the pin.
 
 `auto-hide` (default), `always-visible` and `hidden` are the three modes.
+
+### Growing rather than sliding
+
+The pill does not travel. `revealShape(edge, size, t)` in `lib/geometry.js` is
+a pure function of one 0..1 value, and it hands back the box the pill occupies
+at that moment, the rounding it should be drawn with, how far in the marks
+have faded and how far out the tongue has. The whole animation is a linear
+timeline through that function: every curve lives inside it, where both ports
+can share it.
+
+Three things happen along that timeline, overlapping on purpose so they do not
+read as three animations:
+
+| | |
+|---|---|
+| swell, `t < 0.40` | a drop grows out of the edge, seeded at the tongue's own length so the pointer that summoned it is never outside the shape |
+| stretch, `0.30 < t < 0.88` | the drop flows along the edge into the pill's full length, flattening by 7% on the way and recovering — surface tension, not a bounce |
+| marks, `t > 0.72` | the cells fade in as one group, on a shape that has already settled |
+
+The rounding is part of the morph: at the start the radius is half the short
+side, which is a disc, and it interpolates to the pill's own 24 px as the
+shape stretches. The inverted corners grow in with it — a drop has no bezel
+to invert against yet.
+
+Two things fall out of that, and both are the point:
+
+* the shape never leaves the container's box, so nothing has to be clipped,
+  re-anchored or allowed to overshoot onto a neighbouring monitor;
+* **the pill's actor is the blob**, not a full-size rectangle drawing a small
+  shape inside it. Mutter derives the input region from the geometry of
+  reactive actors, so a pill that drew small while sitting large would keep
+  swallowing clicks over pixels it was no longer painting. The actor is
+  resized every frame instead, and the cells are hidden — not merely
+  transparent — until the shape is big enough to hold them.
+
+The tongue fades out over the first third of the reveal and is gone by the
+time the pill is out. It has nothing left to say at that point, and leaving it
+lit would put a stray white hairline on top of the shape.
 
 ### Who owns which pixels — a GNOME 50 change
 
@@ -225,6 +264,9 @@ non-reactive parent.
 When a session stops working or starts waiting for you, the notch comes out for
 five seconds and plays a sound through Meta's sound player (libcanberra
 underneath — the only supported way to make a noise from inside the Shell).
+The waiting session's ring pulses blue while it is out, which is the only
+thing on screen that says why the notch appeared, and is why that colour must
+not be mistakable for a usage colour.
 Both halves toggle separately, and the first state after startup announces
 nothing, so a login does not chime once per open session.
 
@@ -264,15 +306,28 @@ extension — and two things it can do that GNOME 50 no longer can:
 
 * **A real input region.** `gdk::Surface::set_input_region()` maps straight
   onto `wl_surface.set_input_region`, so the collapsed notch really does hand
-  its pixels back. It is recomputed on every state change and surrendered
-  before the collapse animation. The card surface keeps an empty region for
+  its pixels back. It is recomputed every frame of the reveal, from the same
+  blob the drawing uses, so this port owns exactly the pixels it is painting
+  — and it is surrendered at the *start* of a collapse rather than tracking
+  the shape out, because a click aimed at the window underneath must not be
+  eaten by a pill on its way out. The card surface keeps an empty region for
   its whole life: it is there to be read, never to be hit.
 * **Two surfaces.** The notch and its card are separate layer surfaces, so the
   card is not constrained by the notch's geometry.
 
-`GtkRevealer` does the sliding. Its easing curve is not
-configurable in GTK4, so the 180 ms reveal is GTK's ease rather than the
-extension's ease-out-cubic.
+There is no `GtkRevealer`. It slides a child in and out, which is not what
+the notch does any more, and its easing curve is not configurable in GTK4
+anyway — the reveal is driven by a tick callback through the same
+`reveal_shape` the extension uses, so both ports move identically rather than
+approximately.
+
+Both filmstrips can be looked at without a compositor, which is the only way
+to review an animation that no still screenshot shows:
+
+```bash
+gjs -m tools/render-reveal.js js.png 2
+cargo run -p brimlim-gtk --example reveal -- rs.png 2
+```
 
 ### Keeping the two ports honest
 
@@ -285,8 +340,11 @@ gjs -m tools/dump-reference.js > crates/brimlim-gtk/fixtures/reference.json
 cargo test -p brimlim-gtk
 ```
 
-101 points of the colour grade and 16 edge/count combinations of the pill,
-tongue and ring geometry must match exactly. They currently do.
+101 points of the colour grade, 16 edge/count combinations of the pill,
+tongue and ring geometry, and 168 frames of the reveal must match exactly.
+They currently do. The reveal is the most valuable of the three: a drift of
+one pixel in a static shape is a blemish, and the same drift in an animation
+is a stutter.
 
 ## Packaging
 
@@ -327,6 +385,7 @@ memory, so the numbers below are measurements, not taste:
 | Cell | a 38 px ring with its percentage under it, plus 4 px of room for the waiting pulse that is drawn outside the ring; 46 × 60 px in total |
 | Cell spacing | centre to centre is 2.4 ring diameters — the original is much airier than a first pass assumes |
 | Ring | a dark disc under the mark, the arc on the outside, rounded caps, twelve o'clock clockwise |
+| Waiting | a blue ring pulsing just outside the arc. Blue because the grade is the only thing colour is allowed to mean here: the pulse was orange once, and a session waiting for a reply looked exactly like a window about to hit its limit |
 | Grade | green holds to 30%, yellow at 50%, orange at 70%, red at 100% |
 | Card | black slab with a tail aimed at the ring, `name` + `Resets …` on one line, then the bar, then `N% Used` |
 
@@ -364,14 +423,29 @@ reports whether it enabled, survived the daemon dying, tore down clean — and
 what geometry the Shell actually allocated it:
 
 ```
-geometry:  pill=70x218 container=70x218 visible=true rings=2
+enabled:          state:<1.0>
+always-visible:   state:<1.0>
+daemon killed:    state:<1.0>
+daemon restarted: state:<1.0>
+disabled:         state:<2.0>
+geometry:         pill=70x218 shown=true container=70x218 visible=true rings=2
+collapsed:        the pill unmaps and gives its pixels back
+complaints in the shell log: 0
 ```
 
-That last line exists because "it enabled without errors" and "it drew
+The geometry line exists because "it enabled without errors" and "it drew
 something" are different claims, and the difference is a whole class of bug.
 Passing `layout_manager: null` to the container removed ClutterActor's default
 fixed layout, so its children were never allocated: nothing appeared, no
 exception, extension state ACTIVE, log clean. The harness now fails on it.
+
+The run switches the notch to `always-visible` partway through, for two
+reasons: the allocation it reports at the end is then the revealed pill
+rather than a collapsed one, and the switch itself leaves the collapsed
+state in the log, where the harness checks that the pill really did unmap.
+"Collapsed" has to mean unmapped now that the pill is the blob — an actor
+that stayed mapped at full size would keep owning input over pixels it had
+stopped painting, which is exactly the bug this whole file is about.
 
 Two things to know while iterating:
 

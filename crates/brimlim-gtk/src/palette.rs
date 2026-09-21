@@ -20,7 +20,11 @@ pub const TRACK: Rgba = [1.00, 1.00, 1.00, 0.10];
 pub const DISC: Rgba = [0.17, 0.17, 0.18, 1.00];
 /// Used wherever there is no number — never a usage colour.
 pub const UNKNOWN: Rgba = [0.70, 0.73, 0.78, 0.55];
-pub const WAITING: [f64; 3] = ORANGE;
+/// "This one is waiting for you" — never a usage colour, for the reason
+/// spelled out in the extension's `palette.js`: the pulse is drawn right
+/// outside the usage arc, and a session waiting for a reply must not look
+/// like a window about to hit its limit.
+pub const WAITING: [f64; 3] = [0.42, 0.70, 1.00];
 
 fn lerp(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
     [

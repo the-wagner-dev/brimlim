@@ -13,7 +13,6 @@ import PangoCairo from 'gi://PangoCairo';
 import {Colors, setColor, usageColor} from './palette.js';
 
 const START_ANGLE = -Math.PI / 2;
-const SPIN_SWEEP = Math.PI / 3;
 const TAU = 2 * Math.PI;
 
 /** Centre `text` on (cx, y), and hand back its height. */
@@ -38,13 +37,23 @@ export function centeredText(cr, text, cx, y, size, bold, color) {
  * The provider's mark. Drawn rather than set as text: at 38 logical pixels a
  * font glyph is at the mercy of whatever the user has installed, and these
  * shapes are simple enough to own.
+ *
+ * Pass a `phase` in 0..1 and the mark comes alive: the burst's spokes take
+ * turns reaching out, so a working agent is a shimmer travelling round the
+ * mark rather than a separate spinner drawn beside it. That is one moving
+ * thing per cell instead of two, and the thing that moves is the thing that
+ * says which assistant is busy.
  */
-export function drawMark(cr, id, cx, cy, radius, alpha = 1) {
-    setColor(cr, [1, 1, 1, 1], alpha);
+export function drawMark(cr, id, cx, cy, radius, alpha = 1, phase = null) {
     cr.setLineCap(1 /* round */);
 
     if (id === 'codex') {
-        drawRosette(cr, cx, cy, radius);
+        // A filled shape cannot shimmer spoke by spoke, so it breathes.
+        const breath = phase === null
+            ? 1
+            : 0.93 + 0.07 * (0.5 + 0.5 * Math.cos(TAU * phase));
+        setColor(cr, [1, 1, 1, 1], alpha);
+        drawRosette(cr, cx, cy, radius * breath);
         return;
     }
 
@@ -55,7 +64,18 @@ export function drawMark(cr, id, cx, cy, radius, alpha = 1) {
     for (let i = 0; i < spokes; i += 1) {
         const angle = (i / spokes) * TAU - Math.PI / 2;
         const inner = radius * 0.16;
-        const outer = radius * (i % 2 === 0 ? 1.0 : 0.82);
+
+        // At rest the spokes alternate long and short. While the agent is
+        // working that alternation becomes a wave running round the mark.
+        let outer = radius * (i % 2 === 0 ? 1.0 : 0.82);
+        let lit = 1;
+        if (phase !== null) {
+            const wave = 0.5 + 0.5 * Math.cos(TAU * (phase - i / spokes));
+            outer = radius * (0.74 + 0.3 * wave);
+            lit = 0.4 + 0.6 * wave;
+        }
+
+        setColor(cr, [1, 1, 1, 1], alpha * lit);
         cr.newPath();
         cr.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
         cr.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
@@ -153,19 +173,10 @@ export function paintCell(cr, {ring, inset = 0, scale, provider, phase = 0, puls
         cr.setLineWidth(stroke);
     }
 
-    drawMark(cr, provider.id, center, center, radius * 0.48, known ? 1 : 0.5);
-
-    if (provider.activity === 'busy') {
-        const inner = radius - stroke - Math.round(4 * scale);
-        if (inner > 0) {
-            const from = START_ANGLE + phase * TAU;
-            setColor(cr, [1, 1, 1, 0.75]);
-            cr.setLineWidth(Math.max(1, Math.round(1.5 * scale)));
-            cr.newPath();
-            cr.arc(center, center, inner, from, from + SPIN_SWEEP);
-            cr.stroke();
-        }
-    }
+    drawMark(
+        cr, provider.id, center, center, radius * 0.48,
+        known ? 1 : 0.5,
+        provider.activity === 'busy' ? phase : null);
 
     if (provider.activity === 'waiting') {
         setColor(cr, Colors.waiting, 0.15 + 0.5 * pulse);

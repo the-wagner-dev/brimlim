@@ -6,6 +6,10 @@
 //   * Collapsing is never an unmap. A hidden window cannot receive a hover,
 //     so "hidden" means collapsed down to a tongue that is always present
 //     and always reactive.
+//   * The pill does not slide, it grows: its box, its rounding and its
+//     marks' opacity are all functions of one 0..1 reveal value, which is
+//     `revealShape` in geometry.js and is shared with the GTK port through
+//     the reference fixture rather than through code.
 //   * Input is surrendered on every state transition, and *before* the
 //     collapse animation rather than after it. A click aimed at the window
 //     underneath must not be eaten by a pill that is on its way out.
@@ -24,8 +28,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {Card} from './card.js';
 import {
-    Edge, Metrics, Timing, cellSize, cellWidth, isVertical, pillSize, placement, ringOrigin, scaled,
-    tongueBox,
+    Edge, Metrics, Timing, cellSize, cellWidth, clamp01, isVertical, pillSize, placement,
+    revealShape, ringOrigin, scaled, tongueBox,
 } from './geometry.js';
 import {drawPill, drawTongue} from './pill.js';
 import {Ring} from './ring.js';
@@ -52,6 +56,11 @@ export class Notch {
         this._suppressed = false;
         this._collapseTimer = 0;
         this._revealTimer = 0;
+        this._revealTimeline = null;
+        this._reveal = 0;
+        this._shape = null;
+        this._size = null;
+        this._tongueWanted = false;
         this._unavailable = null;
 
         this._buildActors();
@@ -87,15 +96,21 @@ export class Notch {
 
         this._card = new Card();
 
-        if (GLib.getenv('CODENOTCH_DEBUG')) {
+        if (GLib.getenv('BRIMLIM_DEBUG')) {
             // Allocation is the thing that silently fails. Report it as the
-            // Shell actually computes it, not as we hoped to set it.
-            this._pill.connect('notify::allocation', () => {
+            // Shell actually computes it, not as we hoped to set it — and
+            // report the pill's own visibility with it, because a collapsed
+            // notch is now an unmapped pill rather than a small one, and
+            // "unmapped" is the claim the harness has to be able to check.
+            const report = () => {
                 const box = this._pill.get_allocation_box();
-                console.log(`CODENOTCH-GEOMETRY pill=${Math.round(box.get_width())}x${Math.round(box.get_height())} ` +
+                console.log(`BRIMLIM-GEOMETRY pill=${Math.round(box.get_width())}x${Math.round(box.get_height())} ` +
+                    `shown=${this._pill.visible} ` +
                     `container=${this._container.width}x${this._container.height} ` +
                     `visible=${this._container.visible} rings=${this._rings.size}`);
-            });
+            };
+            this._pill.connect('notify::allocation', report);
+            this._pill.connect('notify::visible', report);
         }
 
         this._pill.connect('enter-event', () => this._onPointerIn());
@@ -118,6 +133,7 @@ export class Notch {
     destroy() {
         this._clearTimer('_collapseTimer');
         this._clearTimer('_revealTimer');
+        this._stopReveal();
         this._setInteractive(false);
 
         Main.layoutManager.removeChrome(this._container);
@@ -245,13 +261,6 @@ export class Notch {
         // monitor; the travel happens inside the container's own box.
         this._container.set_clip(0, 0, width, height);
 
-        this._pill.set_position(0, 0);
-        this._pill.set_size(width, height);
-        this._pillBackground.set_size(width, height);
-
-        this._ringBox.set_position(0, 0);
-        this._ringBox.set_size(width, height);
-
         let index = 0;
         for (const ring of this._rings.values()) {
             const [x, y] = ringOrigin(this._edge, index);
@@ -265,10 +274,12 @@ export class Notch {
         this._tongue.set_size(tw, th);
         this._tongueArea.set_size(tw, th);
 
-        this._hiddenOffset = spot.hiddenOffset;
+        this._size = size;
         this._applyVisibility();
-        this._applyTranslation(this._expanded, false);
-        this._pillBackground.queue_repaint();
+        // The pill's position, size and shape are all functions of the
+        // reveal, so there is nothing to lay out here beyond handing it the
+        // box it now has to grow inside.
+        this._setReveal(this._reveal);
         this._tongueArea.queue_repaint();
     }
 
@@ -284,7 +295,10 @@ export class Notch {
     _applyVisibility() {
         const visible = !this._suppressed && this._mode !== Mode.HIDDEN;
         this._container.visible = visible;
-        this._tongue.visible = visible && this._mode === Mode.AUTO_HIDE;
+        // The tongue is the collapsed state made visible. Once the pill is
+        // out there is nothing for it to say, so it goes.
+        this._tongueWanted = visible && this._mode === Mode.AUTO_HIDE;
+        this._tongue.visible = this._tongueWanted && this._reveal < 1;
 
         if (!visible) {
             this._setInteractive(false);
@@ -350,7 +364,7 @@ export class Notch {
             return;
         this._expanded = true;
         this._setInteractive(true);
-        this._applyTranslation(true, animate);
+        this._animateReveal(true, animate);
     }
 
     _collapse() {
@@ -363,28 +377,95 @@ export class Notch {
         this._setInteractive(false);
         this._card.hide();
         this._hoveredRing = null;
-        this._applyTranslation(false, true);
+        this._animateReveal(false, true);
     }
 
-    _applyTranslation(expanded, animate) {
-        const [dx, dy] = expanded ? [0, 0] : (this._hiddenOffset ?? [0, 0]);
-        const duration = expanded ? Timing.revealMs : Timing.collapseMs;
+    /**
+     * Drive the reveal from one 0..1 value.
+     *
+     * The shape, the pill's own box and the marks' opacity all come out of
+     * `revealShape`, so the drop that swells out of the edge, the stretch
+     * along it and the marks arriving last are one animation rather than
+     * three that have to be kept in step.
+     */
+    _animateReveal(expanded, animate) {
+        this._stopReveal();
 
+        const target = expanded ? 1 : 0;
         if (!animate) {
-            this._pill.remove_all_transitions();
-            this._pill.translation_x = dx;
-            this._pill.translation_y = dy;
+            this._setReveal(target);
             return;
         }
 
-        this._pill.ease({
-            translation_x: dx,
-            translation_y: dy,
-            duration,
-            mode: expanded
-                ? Clutter.AnimationMode.EASE_OUT_CUBIC
-                : Clutter.AnimationMode.EASE_IN_CUBIC,
+        const from = this._reveal;
+        if (from === target)
+            return;
+
+        // Reversing mid-flight takes the time it has left, not a full one,
+        // or a pointer brushing past would leave the pill drifting out long
+        // after the pointer has gone.
+        const span = Math.abs(target - from);
+        const timeline = new Clutter.Timeline({
+            actor: this._container,
+            duration: Math.max(1, Math.round(
+                (expanded ? Timing.revealMs : Timing.collapseMs) * span)),
         });
+        // Linear: every curve in the animation is inside revealShape, where
+        // both frontends can share it.
+        timeline.connect('new-frame', () => {
+            this._setReveal(from + (target - from) * timeline.get_progress());
+        });
+        timeline.connect('completed', () => {
+            this._setReveal(target);
+            this._stopReveal();
+        });
+        this._revealTimeline = timeline;
+        timeline.start();
+    }
+
+    _stopReveal() {
+        if (this._revealTimeline) {
+            const timeline = this._revealTimeline;
+            this._revealTimeline = null;
+            timeline.run_dispose();
+        }
+    }
+
+    _setReveal(t) {
+        this._reveal = clamp01(t);
+        if (!this._size)
+            return;
+
+        const shape = revealShape(this._edge, this._size, this._reveal);
+        this._shape = shape;
+
+        // The pill actor *is* the blob. Mutter derives the input region from
+        // the geometry of reactive actors, so a pill that draws small while
+        // sitting large would keep swallowing clicks over pixels it no
+        // longer covers.
+        const empty = shape.width <= 0 || shape.height <= 0;
+        this._pill.set_position(shape.x, shape.y);
+        this._pill.set_size(shape.width, shape.height);
+        // A pill with no size is not a pill drawn very small: it is not
+        // there, and an actor that is not visible cannot be picked, which is
+        // the clearest way to say the pixels are not ours.
+        this._pill.visible = !empty;
+        if (!empty) {
+            this._pillBackground.set_size(shape.width, shape.height);
+            this._pillBackground.queue_repaint();
+        }
+
+        // Cells keep the coordinates both ports agree on, in the container's
+        // frame, so the box is pushed back by however far the pill is inset.
+        this._ringBox.set_position(-shape.x, -shape.y);
+        this._ringBox.set_size(this._size[0], this._size[1]);
+        this._ringBox.opacity = Math.round(255 * shape.cells);
+        // Invisible is also unpickable, which is what keeps a ring from
+        // owning pixels the half-grown pill does not cover yet.
+        this._ringBox.visible = shape.cells > 0;
+
+        this._tongue.opacity = Math.round(255 * shape.tongue);
+        this._tongue.visible = this._tongueWanted && shape.tongue > 0;
     }
 
     /**
@@ -478,10 +559,11 @@ export class Notch {
 
     _repaintPill(area) {
         const [width, height] = area.get_surface_size();
+        const shape = this._shape;
         const cr = area.get_context();
         drawPill(cr, this._edge, width, height, {
-            flare: scaled(Metrics.flare),
-            radius: scaled(Metrics.pillRadius),
+            flare: shape ? shape.flare : scaled(Metrics.flare),
+            radius: shape ? shape.radius : scaled(Metrics.pillRadius),
         });
         cr.$dispose();
     }
