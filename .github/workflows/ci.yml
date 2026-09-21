@@ -38,6 +38,19 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Every shell script is executable
+        # A script committed without its executable bit runs fine through
+        # `bash script.sh` on a laptop and fails with exit 126 in CI, where
+        # the workflow calls it by path. Cheaper to assert than to discover
+        # halfway through a release.
+        run: |
+          missing="$(find packaging tools -name '*.sh' ! -perm -u+x -print)"
+          if [ -n "$missing" ]; then
+            echo "not executable:"
+            echo "$missing"
+            exit 1
+          fi
+
       - name: Format
         run: cargo fmt --all -- --check
 
